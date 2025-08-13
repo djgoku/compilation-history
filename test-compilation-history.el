@@ -3,10 +3,10 @@
 (require 'ert)
 (require 'compilation-history)
 
-(ert-deftest compilation-history--identifier-test ()
+(ert-deftest compilation-history--partial-buffer-name-test ()
   (should (string-match-p
-           (rx (repeat 8 num) "T" (repeat 12 num))
-           (compilation-history--get-timestamp))))
+           (rx "*compilation-history-" (repeat 8 num) "T" (repeat 12 num) "*")
+           (compilation-history--partial-buffer-name "compilation"))))
 
 (ert-deftest compilation-history--path-test ()
   (cl-letf (((symbol-function 'compilation-history--get-project-root)
@@ -19,7 +19,12 @@
     ;; Test case 2: Compilation in a subdirectory
     (should (string=
              "my-project--src--app"
-             (compilation-history--get-path-string "/path/to/my-project/src/app")))))
+             (compilation-history--get-path-string "/path/to/my-project/src/app")))
+
+    ;; Test case 3: Compilation in a subdirectory with a trailing slash
+    (should (string=
+             "my-project--src--app"
+             (compilation-history--get-path-string "/path/to/my-project/src/app/")))))
 
 (ert-deftest compilation-history--path-test-no-project-root ()
   (cl-letf (((symbol-function 'compilation-history--get-project-root)
@@ -45,11 +50,40 @@
              "1234567890123456789012345"
              (compilation-history--sanitize-command "123456789012345678901234567890")))))
 
-;; We will keep this test for the final integrated function
-(ert-deftest compilation-history--generate-buffer-name-test ()
-  (let ((compilation-history-command-truncate-length 25))
-    (cl-letf (((symbol-function 'compilation-history--get-project-root)
-               (lambda (dir) "/path/to/my-project")))
-      (should (string=
-               "*compilation-history-20250812T153000000000==my-project__make-all*"
-               (compilation-history--generate-buffer-name "make all" "/path/to/my-project" "20250812T153000000000"))))))
+(ert-deftest compilation-history-mode-test ()
+  (let ((original-function compilation-buffer-name-function))
+    ;; Enable the mode
+    (compilation-history-mode 1)
+    (should (eq #'compilation-history--partial-buffer-name compilation-buffer-name-function))
+
+    ;; Disable the mode
+    (compilation-history-mode -1)
+    (should (eq original-function compilation-buffer-name-function))))
+
+(ert-deftest compilation-history-partial-buffer-name-integration-test ()
+  (with-temp-buffer
+    (compilation-history-mode 1)
+    (let ((compilation-mode-hook
+           (lambda ()
+             (should (string-match-p
+                      (rx "*compilation-history-" (repeat 8 num) "T" (repeat 12 num) "*")
+                      (buffer-name))))))
+      (compile "make"))
+    (sit-for 1)))
+
+(ert-deftest compilation-history-full-buffer-name-integration-test ()
+  (with-temp-buffer
+    (compilation-history-mode 1)
+    (let ((compilation-finished-hook
+           (lambda (buffer status)
+             (should (string-match-p
+                      (rx "*compilation-history-"
+                          (repeat 8 num) "T" (repeat 12 num)
+                          "=="
+                          "compilation-history-redux"
+                          "__"
+                          "make"
+                          "*")
+                      (buffer-name buffer))))))
+      (compile "make"))
+    (sit-for 1)))

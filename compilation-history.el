@@ -70,9 +70,12 @@
                            default-directory))
          (project-name (file-name-nondirectory (directory-file-name project-root)))
          (relative-path (file-relative-name default-directory project-root)))
+
+    (when (string-suffix-p "/" relative-path)
+      (setq relative-path (substring relative-path 0 -1)))
     (if (string-equal "." relative-path)
         project-name
-      (mapconcat #'identity (cons project-name (split-string relative-path "/" t)) "--"))))
+      (concat project-name "--" (replace-regexp-in-string "/" "--" relative-path)))))
 
 (defun compilation-history--sanitize-command (compile-command)
   "Return a sanitized version of the compile command."
@@ -84,7 +87,7 @@
 
 (defun compilation-history--get-project-root (dir)
   "Return the project root for DIR."
-  (when-let ((root (locate-dominating-file dir ".git")))
+  (when-let* ((root (locate-dominating-file dir ".git")))
     root))
 
 (defun compilation-history--generate-buffer-name (compile-command default-directory &optional start-time)
@@ -96,6 +99,10 @@
             timestamp
             path-string
             command-sanitized)))
+
+(defun compilation-history--partial-buffer-name (mode-name)
+  "Generate a partially unique buffer name for a compilation."
+  (format "*compilation-history-%s*" (compilation-history--get-timestamp)))
 
 ;;; Database Functions
 
@@ -122,5 +129,33 @@
   (interactive)
   (compilation-history--ensure-db)
   (message "Compilation history database initialized at %s" compilation-history-db-file))
+
+(defun compilation-history--setup-function ()
+  "Setup function for the compilation process."
+  (let* ((command (car compilation-arguments))
+         (buffer-name (compilation-history--generate-buffer-name command default-directory)))
+    (rename-buffer buffer-name)))
+
+(defvar compilation-history--original-buffer-name-function nil)
+(defvar compilation-history--original-setup-function nil)
+
+(define-minor-mode compilation-history-mode
+  "Toggle compilation history tracking."
+  :global t
+  :lighter " CompHist"
+  (if compilation-history-mode
+      (progn
+        (setq compilation-history--original-buffer-name-function
+              compilation-buffer-name-function)
+        (setq compilation-buffer-name-function
+              #'compilation-history--partial-buffer-name)
+        (setq compilation-history--original-setup-function
+              compilation-process-setup-function)
+        (setq compilation-process-setup-function
+              #'compilation-history--setup-function))
+    (setq compilation-buffer-name-function
+          compilation-history--original-buffer-name-function)
+    (setq compilation-process-setup-function
+          compilation-history--original-setup-function)))
 
 (provide 'compilation-history)
