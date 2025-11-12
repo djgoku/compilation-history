@@ -270,9 +270,10 @@ progress we want to stop and save whatever output is present."
 
 (defun compilation-history-set-recompile-command ()
   "Set buffer-local compile-command to make standard recompile work."
-  (when compilation-history--original-command
-    (setq-local compile-command compilation-history--original-command)
-    (setq-local compilation-directory default-directory)))
+  (unless (buffer-local-value 'compile-command (get-buffer (buffer-name)))
+    (when (compilation-history-compile-command compilation-history-record)
+      (setq-local compile-command (compilation-history-compile-command compilation-history-record))
+      (setq-local compilation-directory default-directory))))
 
 ;;; Public API
 
