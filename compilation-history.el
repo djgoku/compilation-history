@@ -238,10 +238,13 @@ doesn't match the compilation-history-record compile-command."
           (setq-local buffer-read-only t)))))
 
 (defun compilation-history--kill-buffer-function ()
-  "Function to handle when compilation buffer is killed."
-  (when-let* ((record-id compilation-history--record-id))
-    (let ((output (buffer-substring-no-properties (point-min) (point-max))))
-      (compilation-history--update-compilation-record record-id -1 output t))))
+  "Function to handle when compilation buffer is killed and exit-code is
+nil else we can mark a compilation-history record killed even though it
+exited successfully."
+  (unless (compilation-history-exit-code compilation-history-record)
+    (when-let* ((record-id (compilation-history-record-id compilation-history-record)))
+      (let ((output (buffer-substring-no-properties (point-min) (point-max))))
+        (compilation-history--update-compilation-record (compilation-history-record-id compilation-history-record) -1 output t)))))
 
 (defun compilation-history--add-sentinel-metadata-advice (proc msg)
   "Simple debug advice for compilation-sentinel focusing on record-id and process."
