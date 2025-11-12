@@ -300,31 +300,20 @@ progress we want to stop and save whatever output is present."
         (compilation-history-set-recompile-command)
         (add-hook 'kill-buffer-hook #'compilation-history--kill-buffer-function nil t)))))
 
-(defvar compilation-history--original-buffer-name-function nil)
-(defvar compilation-history--original-setup-function nil)
-
 (define-minor-mode compilation-history-mode
   "Toggle compilation history tracking."
   :global t
   :lighter " CompHist"
   (if compilation-history-mode
       (progn
-        (setq compilation-history--original-buffer-name-function
-              compilation-buffer-name-function)
         (setq compilation-buffer-name-function
               #'compilation-history--partial-buffer-name)
-        (setq compilation-history--original-setup-function
-              compilation-process-setup-function)
         (setq compilation-process-setup-function
               #'compilation-history--setup-function)
         (add-hook 'compilation-finish-functions #'compilation-history--finish-function)
 
         (advice-add 'compilation-sentinel :before #'compilation-history--add-sentinel-metadata-advice)
         (add-hook 'kill-emacs-hook #'compilation-history--maybe-save-history))
-    (setq compilation-buffer-name-function
-          compilation-history--original-buffer-name-function)
-    (setq compilation-process-setup-function
-          compilation-history--original-setup-function)
     (remove-hook 'compilation-finish-functions #'compilation-history--finish-function)
     (advice-remove 'compilation-sentinel #'compilation-history-add-sentinel-metadata-advice)
     (remove-hook 'kill-emacs-hook #'compilation-history--maybe-save-history)))
