@@ -149,8 +149,19 @@
 
 (defun compilation-history--partial-buffer-name (mode-name)
   "Generate a partially unique buffer name for a compilation."
+  (compilation-history--maybe-fix-buffer-compile-command)
   (format "*compilation-history-%s*" (compilation-history--get-timestamp)))
 
+(defun compilation-history--maybe-fix-buffer-compile-command ()
+  "If we run a compile from an existing compilation buffer there is a
+chance the compile-command will be changed for the existing compilation
+buffer. This function aligns the buffer local compile-command if it
+doesn't match the compilation-history-record compile-command."
+  (if (and (local-variable-p 'compile-command) (string-prefix-p "*compilation-history-" (buffer-name)))
+      (with-current-buffer (buffer-name)
+        (let ((inhibit-read-only t))
+          (unless (eq compile-command (compilation-history-compile-command compilation-history-record))
+            (setq-local compile-command (compilation-history-compile-command compilation-history-record)))))))
 ;;; Database Functions
 
 (defun compilation-history--extract-id-from-buffer-name (buffer-name)
