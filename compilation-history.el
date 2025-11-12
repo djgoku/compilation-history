@@ -185,14 +185,19 @@ doesn't match the compilation-history-record compile-command."
           (sqlite-execute db sql))
       (sqlite-close db))))
 
-(defun compilation-history--insert-compilation-record (id buffer-name command default-directory system-info)
+(defun compilation-history--insert-compilation-record (compilation-history-record)
   "Insert a new compilation record into the database."
-  (let ((sql "INSERT INTO compilations (id, buffer_name, compile_command, default_directory, start_time, git_repo, git_branch, git_commit, git_commit_message, git_remote_urls, os, os_version, emacs_version) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)"))
+  (let* ((id (compilation-history-record-id compilation-history-record))
+         (buffer-name (compilation-history-buffer-name compilation-history-record))
+         (compile-command (compilation-history-compile-command compilation-history-record))
+         (default-directory (compilation-history-default-directory compilation-history-record))
+         (system-info (compilation-history-system-info compilation-history-record))
+         (sql "INSERT INTO compilations (id, buffer_name, compile_command, default_directory, start_time, git_repo, git_branch, git_commit, git_commit_message, git_remote_urls, os, os_version, emacs_version) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)"))
     (compilation-history--execute-sql
      sql
      (vector id
              buffer-name
-             command
+             compile-command
              default-directory
              (plist-get system-info :git-repo)
              (plist-get system-info :git-branch)
@@ -217,11 +222,11 @@ doesn't match the compilation-history-record compile-command."
 
 (defun compilation-history--finish-function (buffer status)
   "Finish function for compilation-finished-hook."
-  (when-let* ((record-id (buffer-local-value 'compilation-history--record-id buffer)))
+  (when-let* ((record-id (compilation-history-record-id (buffer-local-value 'compilation-history-record buffer))))
     (with-current-buffer buffer
       (let* ((output (buffer-substring-no-properties (point-min) (point-max)))
              (killed (string-match-p "killed\|interrupt" status))
-             (exit-code (buffer-local-value 'compilation-history--exit-code buffer)))
+             (exit-code (compilation-history-exit-code (buffer-local-value 'compilation-history-record buffer))))
         (compilation-history--update-compilation-record record-id exit-code output killed))
       (setq-local compilation-arguments nil)
       ;; would be nice if we could switch to compilation-mode if in
@@ -242,8 +247,8 @@ doesn't match the compilation-history-record compile-command."
   "Simple debug advice for compilation-sentinel focusing on record-id and process."
   (let* ((buffer (process-buffer proc)))
     (with-current-buffer buffer
-      (setq-local compilation-history--exit-code (process-exit-status proc))
-      (setq-local compilation-history--message msg))))
+      (setf (compilation-history-exit-code compilation-history-record) (process-exit-status proc)
+            (compilation-history-message compilation-history-record) msg))))
 
 (defun compilation-history--maybe-save-history ()
   "This is came about since if we close emacs and a compilation is still in
@@ -255,7 +260,7 @@ progress we want to stop and save whatever output is present."
         (with-current-buffer buffer
           (call-interactively 'kill-compilation)
           (sit-for .25)
-          (setq-local compilation-history--exit-code (process-exit-status proc))
+          (setf (compilation-history-exit-code compilation-history-record) (process-exit-status proc))
           (compilation-history--finish-function buffer "interrupt"))))))
 
 ;;; Recompile Support
@@ -285,10 +290,9 @@ progress we want to stop and save whatever output is present."
              (system-info (compilation-history--get-system-info default-directory)))
         (rename-buffer buffer-name)
         (compilation-history--ensure-db)
-        (setq-local compilation-history--record-id record-id)
-        (setq-local compilation-history--original-command command)
-        (setq-local compilation-history--system-info system-info)
-        (compilation-history--insert-compilation-record record-id buffer-name command default-directory system-info)
+        (setq-local compilation-history-record (make-compilation-history :record-id record-id :compile-command command :system-info system-info :buffer-name buffer-name :default-directory default-directory))
+        (add-hook 'compilation-finish-functions #'compilation-history--finish-function nil t)
+        (compilation-history--insert-compilation-record compilation-history-record)
         (compilation-history-set-recompile-command)
         (add-hook 'kill-buffer-hook #'compilation-history--kill-buffer-function nil t)))))
 
@@ -320,6 +324,8 @@ progress we want to stop and save whatever output is present."
     (remove-hook 'compilation-finish-functions #'compilation-history--finish-function)
     (advice-remove 'compilation-sentinel #'compilation-history-add-sentinel-metadata-advice)
     (remove-hook 'kill-emacs-hook #'compilation-history--maybe-save-history)))
+
+(cl-defstruct compilation-history compile-command record-id system-info buffer-name default-directory exit-code message)
 
 (provide 'compilation-history)
 
