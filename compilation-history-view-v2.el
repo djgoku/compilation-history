@@ -355,6 +355,7 @@ If KEEP-VIEW-VISIBLE is non-nil, display the buffer in another window."
         (setq-local compile-command compile-command)
         (setq-local default-directory default-directory)
         (setq-local compilation-directory default-directory)
+        (setq-local compilation-history-record (make-compilation-history :compile-command compile-command :default-directory default-directory))
         (goto-char (point-min))))
     (if keep-view-visible
         (compilation-history-view-v2--display-compilation-buffer buffer)
