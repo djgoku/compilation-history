@@ -34,29 +34,6 @@
                                   string-end)
                               timestamp)))))
 
-(ert-deftest test-format-record-with-valid-record ()
-  "Test formatting a valid compilation-history record."
-  (let ((record (make-compilation-history
-                 :record-id "20250119T120000123456"
-                 :command "make test"
-                 :default-directory "/tmp/"
-                 :start-time "2025-01-19 12:00:00"
-                 :end-time "2025-01-19 12:01:00"
-                 :exit-code 0
-                 :killed nil
-                 :git-branch "main"
-                 :git-commit "abc123")))
-    (let ((formatted (compilation-history--format-record record)))
-      (should (stringp formatted))
-      (should (string-match-p "20250119T120000123456" formatted))
-      (should (string-match-p "make test" formatted))
-      (should (string-match-p "main" formatted))
-      (should (string-match-p "abc123" formatted)))))
-
-(ert-deftest test-format-record-with-nil ()
-  "Test formatting when record is nil."
-  (let ((formatted (compilation-history--format-record nil)))
-    (should (eq formatted 'not-set))))
 
 (ert-deftest test-compilation-history-mode-activation ()
   "Test that compilation-history-mode sets up hooks correctly."
@@ -131,7 +108,7 @@
   (let* ((buffer (generate-new-buffer "*test-compilation*"))
          (test-record (make-compilation-history
                        :record-id "20250119T120000123456"
-                       :command "echo test")))
+                       :compile-command "echo test")))
     (unwind-protect
         (with-current-buffer buffer
           (setq-local compilation-history-record test-record)
@@ -158,7 +135,8 @@
   "Integration test: activate mode, run compile, verify database record."
   (compilation-history-test-with-db
     (let ((orig-db-file compilation-history-db-file)
-          (test-command "echo 'integration test' && sleep 1"))
+          (orig-compile-command compile-command)
+          (test-command "echo 'integration test'"))
       (unwind-protect
           (progn
             (compilation-history-init)
@@ -178,16 +156,13 @@
                                            (string-prefix-p "*compilation-history-" (buffer-name buf)))
                                          (buffer-list))))
               (should comp-buffer)
-              (message "Found compilation buffer: %s" (buffer-name comp-buffer))
 
-              ;; Verify and print record
+              ;; Verify record in buffer
               (with-current-buffer comp-buffer
                 (should (local-variable-p 'compilation-history-record))
                 (let ((record compilation-history-record))
-                  (message "Record: %s" (compilation-history--format-record record))
-
                   ;; Verify record fields
-                  (should (equal test-command (compilation-history-command record)))
+                  (should (equal test-command (compilation-history-compile-command record)))
                   (should (stringp (compilation-history-record-id record)))
                   (should (stringp (compilation-history-buffer-name record)))
 
@@ -195,38 +170,21 @@
                   (let* ((record-id (compilation-history-record-id record))
                          (db (sqlite-open temp-db))
                          (rows (sqlite-select db "SELECT * FROM compilations WHERE id = ?" (vector record-id))))
-                    (message "Found %d database rows" (length rows))
                     (should (= 1 (length rows)))
                     (let* ((row (car rows))
+                           (db-command (nth 2 row))
                            (db-start-time (nth 4 row))
                            (db-end-time (nth 5 row))
                            (db-git-repo (nth 8 row))
                            (db-git-branch (nth 9 row))
-                           (db-git-commit (nth 10 row))
-                           (db-git-commit-message (nth 11 row))
-                           (db-git-remote-urls (nth 12 row)))
-                      (should (equal test-command (nth 2 row)))
-                      ;; Verify timestamps from database
+                           (db-git-commit (nth 10 row)))
+                      (should (equal test-command db-command))
                       (should (stringp db-start-time))
-                      (message "Database start_time: %s" db-start-time)
                       (should (stringp db-end-time))
-                      (message "Database end_time: %s" db-end-time)
-                      ;; Verify git metadata from database
-                      (message "Database git_repo: %s" db-git-repo)
-                      (message "Database git_branch: %s" db-git-branch)
-                      (message "Database git_commit: %s" db-git-commit)
-                      (message "Database git_commit_message: %s" db-git-commit-message)
-                      (message "Database git_remote_urls: %s" db-git-remote-urls)
                       ;; Should have git metadata since we're in a git repo
                       (should (stringp db-git-repo))
                       (should (stringp db-git-branch))
-                      (should (stringp db-git-commit))
-                      ;; Update struct with database values
-                      (setf (compilation-history-start-time record) db-start-time)
-                      (setf (compilation-history-end-time record) db-end-time)
-                      (setf (compilation-history-git-branch record) db-git-branch)
-                      (setf (compilation-history-git-commit record) db-git-commit)
-                      (message "Updated record: %s" (compilation-history--format-record record)))
+                      (should (stringp db-git-commit)))
                     (sqlite-close db)))
 
                 ;; Cleanup buffer
@@ -234,6 +192,7 @@
 
         ;; Cleanup
         (compilation-history-mode -1)
+        (setq compile-command orig-compile-command)
         (setq compilation-history-db-file orig-db-file)))))
 
 (ert-deftest test-compile-from-non-compilation-buffer ()

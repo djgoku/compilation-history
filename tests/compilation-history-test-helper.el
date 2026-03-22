@@ -40,14 +40,14 @@ Variables available in BODY: temp-dir, temp-db."
 (cl-defun compilation-history-test--make-record (&key
                                                  (record-id (format-time-string "%Y%m%dT%H%M%S000000"))
                                                  (buffer-name "*compilation-history-test*")
-                                                 (command "make test")
+                                                 (compile-command "make test")
                                                  (default-directory "/tmp/")
                                                  (system-info '(:os darwin :emacs-version "29.1")))
   "Create a test compilation record with optional keyword arguments.
 All parameters are optional and have sensible test defaults."
   (make-compilation-history
    :buffer-name buffer-name
-   :command command
+   :compile-command compile-command
    :default-directory default-directory
    :record-id record-id
    :system-info system-info))

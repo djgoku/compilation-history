@@ -316,7 +316,9 @@ progress we want to stop and save whatever output is present."
               #'compilation-history--setup-function)
         (advice-add 'compilation-sentinel :before #'compilation-history--add-sentinel-metadata-advice)
         (add-hook 'kill-emacs-hook #'compilation-history--maybe-save-history))
-    (advice-remove 'compilation-sentinel #'compilation-history-add-sentinel-metadata-advice)
+    (setq compilation-buffer-name-function nil)
+    (setq compilation-process-setup-function nil)
+    (advice-remove 'compilation-sentinel #'compilation-history--add-sentinel-metadata-advice)
     (remove-hook 'kill-emacs-hook #'compilation-history--maybe-save-history)))
 
 (provide 'compilation-history)
