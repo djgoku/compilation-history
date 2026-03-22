@@ -33,7 +33,7 @@
 (defun compilation-history-view--calculate-page-size ()
   "Calculate page size from current window height.
 Subtracts space for header-line and pagination controls."
-  (max 1 (- (window-height) 5)))
+  (max 1 (- (window-height) 6)))
 
 ;;; Column Configuration
 
@@ -344,13 +344,13 @@ When DISABLED is non-nil, button is dimmed and non-interactive."
   (interactive)
   (compilation-history--ensure-db)
   (let ((buf (get-buffer-create "*Compilation History*")))
-    (with-current-buffer buf
-      (unless (eq major-mode 'compilation-history-view-mode)
-        (compilation-history-view-mode)
-        (setq compilation-history-view--pagination
-              (make-compilation-history-view-pagination :page-size 25)))
-      (compilation-history-view--render))
     (switch-to-buffer buf)
+    (unless (eq major-mode 'compilation-history-view-mode)
+      (compilation-history-view-mode)
+      (setq compilation-history-view--pagination
+            (make-compilation-history-view-pagination
+             :page-size (compilation-history-view--calculate-page-size))))
+    (compilation-history-view--render)
     buf))
 
 ;;; Navigation
