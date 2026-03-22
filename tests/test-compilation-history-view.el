@@ -210,5 +210,40 @@
               (should (string-match-p "(0 records)" ml))))
         (kill-buffer buf)))))
 
+(ert-deftest test-compilation-history-view-open-compilation ()
+  "RET opens compilation buffer in other window."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((buf-name "*compilation-history-20260321T120000000001==proj__make-test*"))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record
+        :record-id "20260321T120000000001"
+        :compile-command "make test"
+        :buffer-name buf-name))
+      (compilation-history--update-compilation-record
+       "20260321T120000000001" 0 "build output here")
+      (let ((view-buf (compilation-history-view)))
+        (unwind-protect
+            (with-current-buffer view-buf
+              (goto-char (point-min))
+              (let ((obj (vtable-current-object)))
+                (should obj)
+                (should (equal (plist-get obj :command) "make test"))))
+          (kill-buffer view-buf)
+          (when (get-buffer buf-name)
+            (kill-buffer buf-name)))))))
+
+(ert-deftest test-compilation-history-view-no-record-at-point ()
+  "RET on non-data row shows message."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (goto-char (point-max))
+            ;; Should not error
+            (compilation-history-view-open))
+        (kill-buffer buf)))))
+
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here

@@ -306,10 +306,40 @@ When DISABLED is non-nil, button is dimmed and non-interactive."
         (compilation-history-view--calculate-page-size))
   (compilation-history-view--render))
 
-;;; Stubs (implemented in later tasks)
+;;; Opening
+
+(defun compilation-history-view--display-record (record)
+  "Display compilation buffer for RECORD.
+Reuses existing buffer if still alive, otherwise creates from database.
+Returns the displayed buffer."
+  (let* ((buf-name (plist-get record :buffer-name))
+         (id (plist-get record :id))
+         (existing (get-buffer buf-name)))
+    (if existing
+        (progn (display-buffer existing) existing)
+      (let ((output (compilation-history--get-output id))
+            (buf (get-buffer-create buf-name)))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (when output (insert output)))
+          (compilation-mode)
+          (setq buffer-read-only t))
+        (display-buffer buf)
+        buf))))
 
 (defun compilation-history-view-open ()
-  "Open record at point." (interactive) (message "Not yet implemented"))
+  "Open the compilation record at point in other window and switch to it."
+  (interactive)
+  (setq compilation-history-view--preview-mode nil)
+  (if-let* ((object (vtable-current-object)))
+      (let* ((buf (compilation-history-view--display-record object))
+             (win (get-buffer-window buf)))
+        (when win (select-window win)))
+    (message "No compilation record at point")))
+
+;;; Preview stubs (implemented in next task)
+
 (defun compilation-history-view-preview ()
   "Preview record at point." (interactive) (message "Not yet implemented"))
 (defun compilation-history-view-preview-next ()
