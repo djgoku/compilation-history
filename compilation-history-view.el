@@ -33,7 +33,7 @@
 (defun compilation-history-view--calculate-page-size ()
   "Calculate page size from current window height.
 Subtracts space for header-line and pagination controls."
-  (max 1 (- (window-height) 4)))
+  (max 1 (- (window-height) 5)))
 
 ;;; Column Configuration
 
@@ -299,13 +299,19 @@ INDEX is the 0-based row position within the current page."
          (on-first (= current 1))
          (on-last (= current total-pages)))
     (insert "\n")
-    (compilation-history-view--insert-button "First" #'compilation-history-view-first-page on-first)
-    (insert " ")
-    (compilation-history-view--insert-button "Previous" #'compilation-history-view-prev-page on-first)
-    (insert (format " Page %d of %d (%d records) " current total-pages total-records))
-    (compilation-history-view--insert-button "Next" #'compilation-history-view-next-page on-last)
-    (insert " ")
-    (compilation-history-view--insert-button "Last" #'compilation-history-view-last-page on-last)))
+    ;; Build the pagination line in a temp buffer to measure its width
+    (let* ((line (concat "[First] [Previous]"
+                         (format " Page %d of %d (%d records) " current total-pages total-records)
+                         "[Next] [Last]"))
+           (padding (max 0 (/ (- (window-width) (length line)) 2))))
+      (insert (make-string padding ?\s))
+      (compilation-history-view--insert-button "First" #'compilation-history-view-first-page on-first)
+      (insert " ")
+      (compilation-history-view--insert-button "Previous" #'compilation-history-view-prev-page on-first)
+      (insert (format " Page %d of %d (%d records) " current total-pages total-records))
+      (compilation-history-view--insert-button "Next" #'compilation-history-view-next-page on-last)
+      (insert " ")
+      (compilation-history-view--insert-button "Last" #'compilation-history-view-last-page on-last))))
 
 (defun compilation-history-view--insert-button (label action &optional disabled)
   "Insert a text button with LABEL that calls ACTION.
