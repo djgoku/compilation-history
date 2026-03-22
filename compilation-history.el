@@ -224,6 +224,32 @@ doesn't match the compilation-history-record compile-command."
      sql
      (vector exit-code output (if killed 1 0) id))))
 
+(defun compilation-history--count-records ()
+  "Return the total number of compilation records."
+  (let ((db (sqlite-open compilation-history-db-file)))
+    (unwind-protect
+        (caar (sqlite-select db "SELECT COUNT(*) FROM compilations"))
+      (sqlite-close db))))
+
+(defun compilation-history--query-page (limit offset)
+  "Return LIMIT compilation records starting at OFFSET, newest first.
+Each row includes a computed duration_seconds column appended at the end."
+  (let ((db (sqlite-open compilation-history-db-file)))
+    (unwind-protect
+        (sqlite-select db
+                       "SELECT *, CASE WHEN end_time IS NOT NULL AND start_time IS NOT NULL THEN (julianday(end_time) - julianday(start_time)) * 86400.0 ELSE NULL END AS duration_seconds FROM compilations ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                       (vector limit offset))
+      (sqlite-close db))))
+
+(defun compilation-history--get-output (id)
+  "Return the output for compilation record with ID, or nil."
+  (let ((db (sqlite-open compilation-history-db-file)))
+    (unwind-protect
+        (caar (sqlite-select db
+                             "SELECT output FROM compilations WHERE id = ?"
+                             (vector id)))
+      (sqlite-close db))))
+
 (defun compilation-history--finish-function (buffer status)
   "Finish function for compilation-finished-hook."
   (when-let* ((record-id (compilation-history-record-id (buffer-local-value 'compilation-history-record buffer))))
