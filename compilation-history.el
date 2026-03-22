@@ -29,6 +29,9 @@
 
 ;;; Keymaps
 
+(autoload 'compilation-history-view "compilation-history-view"
+  "Open the compilation history view buffer." t)
+
 (defvar compilation-history-map (make-sparse-keymap)
   "Keymap for compilation history commands.")
 
@@ -121,7 +124,8 @@ Indexes compile_command, default_directory, git_branch, and output.")
 ;;; Buffer Name
 
 (defun compilation-history--get-timestamp (&optional start-time)
-  "Return a timestamp string."
+  "Return a timestamp string in YYYYMMDDTHHMMSSffffff format.
+If START-TIME is non-nil, return it unchanged."
   (or start-time
       (format-time-string "%Y%m%dT%H%M%S%6N")))
 
@@ -197,10 +201,10 @@ _MODE is required by `compilation-buffer-name-function' but unused."
   (format "*compilation-history-%s*" (compilation-history--get-timestamp)))
 
 (defun compilation-history--maybe-fix-buffer-compile-command ()
-  "If we run a compile from an existing compilation buffer there is a
-chance the compile-command will be changed for the existing compilation
-buffer. This function aligns the buffer local compile-command if it
-doesn't match the compilation-history-record compile-command."
+  "Restore buffer-local `compile-command' to match the compilation record.
+When compiling from an existing compilation-history buffer, Emacs may
+overwrite the buffer-local `compile-command'.  This function detects
+that case and restores it to the value stored in the record."
   (when (and (local-variable-p 'compile-command)
              (string-prefix-p "*compilation-history-" (buffer-name))
              (boundp 'compilation-history-record)
@@ -300,13 +304,23 @@ Use after upgrading the FTS schema (e.g., adding columns)."
         (caar (sqlite-select db "SELECT COUNT(*) FROM compilations"))
       (sqlite-close db))))
 
+(defconst compilation-history--page-columns
+  "id, buffer_name, compile_command, default_directory, start_time, end_time, exit_code, killed, git_branch, git_commit"
+  "Columns selected for page queries (excludes large output BLOB).")
+
+(defconst compilation-history--duration-expr
+  "CASE WHEN end_time IS NOT NULL AND start_time IS NOT NULL THEN (julianday(end_time) - julianday(start_time)) * 86400.0 ELSE NULL END AS duration_seconds"
+  "SQL expression to compute duration in seconds.")
+
 (defun compilation-history--query-page (limit offset)
   "Return LIMIT compilation records starting at OFFSET, newest first.
 Each row includes a computed duration_seconds column appended at the end."
   (let ((db (sqlite-open compilation-history-db-file)))
     (unwind-protect
         (sqlite-select db
-                       "SELECT *, CASE WHEN end_time IS NOT NULL AND start_time IS NOT NULL THEN (julianday(end_time) - julianday(start_time)) * 86400.0 ELSE NULL END AS duration_seconds FROM compilations ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                       (format "SELECT %s, %s FROM compilations ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                               compilation-history--page-columns
+                               compilation-history--duration-expr)
                        (vector limit offset))
       (sqlite-close db))))
 
@@ -337,6 +351,9 @@ Handles plain terms (searches all FTS columns) and column:value syntax."
   (if (string-match "\\`\\([a-z_]+\\):\\(.+\\)\\'" search-term)
       (let ((col (match-string 1 search-term))
             (val (match-string 2 search-term)))
+        (unless (member col compilation-history--fts-column-names)
+          (user-error "Unknown search column: %s (valid: %s)"
+                      col (mapconcat #'identity compilation-history--fts-column-names ", ")))
         (cons (format "%s LIKE ?" col)
               (vector (concat "%" val "%"))))
     ;; Plain term: search across all FTS-indexed columns
@@ -364,18 +381,20 @@ Uses LIKE for short terms (< 3 chars), FTS otherwise."
 (defun compilation-history--query-page-fts (limit offset search-term)
   "Return LIMIT matching records starting at OFFSET, newest first.
 Uses LIKE for short terms (< 3 chars), FTS otherwise."
-  (let ((db (sqlite-open compilation-history-db-file))
-        (duration-expr "CASE WHEN end_time IS NOT NULL AND start_time IS NOT NULL THEN (julianday(end_time) - julianday(start_time)) * 86400.0 ELSE NULL END AS duration_seconds"))
+  (let ((db (sqlite-open compilation-history-db-file)))
     (unwind-protect
         (if (compilation-history--search-needs-like-p search-term)
             (let ((parts (compilation-history--like-sql-parts search-term)))
               (sqlite-select db
-                             (format "SELECT *, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                                     duration-expr (car parts))
+                             (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                     compilation-history--page-columns
+                                     compilation-history--duration-expr
+                                     (car parts))
                              (vconcat (cdr parts) (vector limit offset))))
           (sqlite-select db
-                         (format "SELECT *, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                                 duration-expr)
+                         (format "SELECT %s, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                 compilation-history--page-columns
+                                 compilation-history--duration-expr)
                          (vector search-term limit offset)))
       (sqlite-close db))))
 
@@ -393,14 +412,15 @@ Uses LIKE for short terms (< 3 chars), FTS otherwise."
       ;; it doesn't work with a comint-mode buffer.  so maybe switch
       ;; to compilation-mode without running any hooks? if that is
       ;; possible
-      (if (eq major-mode 'comint-mode)
-          (setq-local buffer-read-only t)))))
+      (when (eq major-mode 'comint-mode)
+        (setq-local buffer-read-only t)))))
 
 (defun compilation-history--kill-buffer-function ()
-  "Function to handle when compilation buffer is killed and exit-code is
-nil else we can mark a compilation-history record killed even though it
-exited successfully."
-  (unless (compilation-history-exit-code compilation-history-record)
+  "Mark the compilation record as killed if it has no exit code yet.
+Does nothing if the record already has an exit code, preventing
+completed compilations from being incorrectly marked as killed."
+  (when (and compilation-history-record
+             (not (compilation-history-exit-code compilation-history-record)))
     (when-let* ((record-id (compilation-history-record-id compilation-history-record)))
       (let ((output (buffer-substring-no-properties (point-min) (point-max))))
         (compilation-history--update-compilation-record (compilation-history-record-id compilation-history-record) -1 output t)))))

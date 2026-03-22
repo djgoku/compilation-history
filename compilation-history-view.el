@@ -149,13 +149,11 @@ Returns empty string if SECONDS is nil."
 
 (defun compilation-history-view--row-to-plist (row &optional index)
   "Convert a database ROW (list) to a plist for vtable display.
-ROW is a list matching the SELECT * column order of the compilations table,
-with an appended duration_seconds column from the SQL query.
+ROW columns match `compilation-history--page-columns' with duration appended.
 INDEX is the 0-based row position within the current page."
   ;; Column order: id(0), buffer_name(1), compile_command(2), default_directory(3),
-  ;; start_time(4), end_time(5), exit_code(6), killed(7), git_repo(8),
-  ;; git_branch(9), git_commit(10), git_commit_message(11), git_remote_urls(12),
-  ;; os(13), os_version(14), emacs_version(15), output(16), duration_seconds(17)
+  ;; start_time(4), end_time(5), exit_code(6), killed(7),
+  ;; git_branch(8), git_commit(9), duration_seconds(10)
   (let* ((id (nth 0 row))
          (buffer-name (nth 1 row))
          (compile-command (nth 2 row))
@@ -164,9 +162,9 @@ INDEX is the 0-based row position within the current page."
          (end-time (nth 5 row))
          (exit-code (nth 6 row))
          (killed (nth 7 row))
-         (git-branch (nth 9 row))
-         (git-commit (nth 10 row))
-         (duration (nth 17 row)))
+         (git-branch (nth 8 row))
+         (git-commit (nth 9 row))
+         (duration (nth 10 row)))
     (list :id id
           :buffer-name buffer-name
           :command compile-command
@@ -350,7 +348,7 @@ When DISABLED is non-nil, button is dimmed and non-interactive."
   (interactive)
   (compilation-history--ensure-db)
   (let ((buf (get-buffer-create "*Compilation History*")))
-    (switch-to-buffer buf)
+    (pop-to-buffer buf '((display-buffer-reuse-window display-buffer-same-window)))
     (unless (eq major-mode 'compilation-history-view-mode)
       (compilation-history-view-mode)
       (setq compilation-history-view--pagination
@@ -491,8 +489,8 @@ Returns the displayed buffer."
         (compilation-history-view--display-record object)
         (select-window view-window)))))
 
-(defconst compilation-history-view--fts-columns
-  '("compile_command" "default_directory" "git_branch" "output")
+(defvaralias 'compilation-history-view--fts-columns
+  'compilation-history--fts-column-names
   "Column names available for FTS column-specific searches.")
 
 (defun compilation-history-view--search-capf ()

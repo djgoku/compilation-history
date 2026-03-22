@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'seq)
 (require 'compilation-history)
 (require 'compilation-history-test-helper)
 
