@@ -60,5 +60,233 @@
       ;; Non-existent ID
       (should-not (compilation-history--get-output "nonexistent")))))
 
+;;; FTS5 tests
+
+(ert-deftest test-compilation-history--fts-table-created ()
+  "FTS5 virtual table is created by ensure-db."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (let ((tables (sqlite-select db "SELECT name FROM sqlite_master WHERE type='table' AND name='compilations_fts'")))
+            (should (equal (caar tables) "compilations_fts")))
+        (sqlite-close db)))))
+
+(ert-deftest test-compilation-history--fts-triggers-created ()
+  "FTS5 sync triggers are created by ensure-db."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (let ((triggers (sqlite-select db "SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name")))
+            (should (= (length triggers) 3))
+            (should (equal (caar triggers) "compilations_fts_delete"))
+            (should (equal (car (nth 1 triggers)) "compilations_fts_insert"))
+            (should (equal (car (nth 2 triggers)) "compilations_fts_update")))
+        (sqlite-close db)))))
+
+(ert-deftest test-compilation-history--fts-search-finds-records ()
+  "FTS5 search returns matching records by full word."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    ;; Insert records with different commands
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "npm run build"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000003"
+      :compile-command "make clean"))
+    ;; FTS search for "make"
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (let ((results (sqlite-select db
+                           "SELECT compile_command FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
+                           ["make"])))
+            (should (= (length results) 2))
+            (should (cl-every (lambda (r) (string-match-p "make" (car r))) results)))
+        (sqlite-close db)))))
+
+(ert-deftest test-compilation-history--fts-substring-search ()
+  "FTS5 trigram tokenizer supports substring matching."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "npm run build"))
+    ;; Substring search for "ake" should match "make test"
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (let ((results (sqlite-select db
+                           "SELECT compile_command FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
+                           ["ake"])))
+            (should (= (length results) 1))
+            (should (string-match-p "make" (caar results))))
+        (sqlite-close db)))))
+
+(ert-deftest test-compilation-history--fts-auto-syncs-on-insert ()
+  "FTS index is automatically updated when records are inserted."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (progn
+            ;; Initially empty
+            (should (= (caar (sqlite-select db "SELECT COUNT(*) FROM compilations_fts")) 0))
+            ;; Insert a record
+            (compilation-history--insert-compilation-record
+             (compilation-history-test--make-record
+              :record-id "20260321T120000000001"
+              :compile-command "cargo test"))
+            ;; FTS should have it
+            (let ((results (sqlite-select db
+                             "SELECT * FROM compilations_fts WHERE compilations_fts MATCH ?"
+                             ["cargo"])))
+              (should (= (length results) 1))))
+        (sqlite-close db)))))
+
+(ert-deftest test-compilation-history--fts-output-search ()
+  "FTS5 can search in compilation output."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"))
+    (compilation-history--update-compilation-record
+     "20260321T120000000001" 1 "error: undefined reference to foo")
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "make build"))
+    (compilation-history--update-compilation-record
+     "20260321T120000000002" 0 "Build successful")
+    ;; Search output for "undefined"
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (let ((results (sqlite-select db
+                           "SELECT c.compile_command FROM compilations c WHERE c.rowid IN (SELECT rowid FROM compilations_fts WHERE output MATCH ?)"
+                           ["undefined"])))
+            (should (= (length results) 1))
+            (should (equal (caar results) "make test")))
+        (sqlite-close db)))))
+
+(ert-deftest test-compilation-history--fts-column-specific-search ()
+  "FTS5 supports column-specific searches."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"
+      :default-directory "/tmp/project-a/"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "npm run test"
+      :default-directory "/tmp/project-b/"))
+    ;; Search only in compile_command for "make"
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (let ((results (sqlite-select db
+                           "SELECT c.compile_command FROM compilations c WHERE c.rowid IN (SELECT rowid FROM compilations_fts WHERE compile_command MATCH ?)"
+                           ["make"])))
+            (should (= (length results) 1))
+            (should (equal (caar results) "make test")))
+        (sqlite-close db)))))
+
+;;; FTS query function tests
+
+(ert-deftest test-compilation-history--count-records-fts ()
+  "FTS count returns correct count for matching records."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "npm run build"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000003"
+      :compile-command "make clean"))
+    (should (= (compilation-history--count-records-fts "make") 2))
+    (should (= (compilation-history--count-records-fts "npm") 1))
+    (should (= (compilation-history--count-records-fts "nonexistent") 0))))
+
+(ert-deftest test-compilation-history--query-page-fts ()
+  "FTS page query returns matching records with pagination."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "npm run build"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000003"
+      :compile-command "make clean"))
+    ;; Search for "make" with pagination
+    (let ((page (compilation-history--query-page-fts 1 0 "make")))
+      (should (= (length page) 1)))
+    (let ((page (compilation-history--query-page-fts 10 0 "make")))
+      (should (= (length page) 2)))))
+
+;;; LIKE fallback tests
+
+(ert-deftest test-compilation-history--short-search-uses-like ()
+  "Search terms shorter than 3 chars fall back to LIKE."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "echo date pwd ls"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "make test"))
+    ;; "ls" is 2 chars — should use LIKE and find it
+    (should (= (compilation-history--count-records-fts "ls") 1))
+    ;; "pw" is 2 chars
+    (should (= (compilation-history--count-records-fts "pw") 1))
+    ;; Query page also works
+    (let ((page (compilation-history--query-page-fts 10 0 "ls")))
+      (should (= (length page) 1)))))
+
+(ert-deftest test-compilation-history--short-column-search-uses-like ()
+  "Column-specific searches with short values fall back to LIKE."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "echo date pwd ls"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "make test"))
+    ;; Column-specific with short value
+    (should (= (compilation-history--count-records-fts "compile_command:ls") 1))
+    ;; Column-specific with 3+ chars still uses FTS
+    (should (= (compilation-history--count-records-fts "compile_command:make") 1))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here

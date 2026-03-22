@@ -485,5 +485,52 @@
           (when (get-buffer comp-buf-name)
             (kill-buffer comp-buf-name)))))))
 
+;;; Search tests
+
+(ert-deftest test-compilation-history-view-search-filters-records ()
+  "Setting search-term filters the view to matching records."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"))
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000002"
+      :compile-command "npm run build"))
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            ;; Initially shows all records
+            (should (= (compilation-history-view-pagination-total-records
+                        compilation-history-view--pagination) 2))
+            ;; Set search term and re-render
+            (setq compilation-history-view--search-term "make")
+            (setf (compilation-history-view-pagination-current-page
+                   compilation-history-view--pagination) 1)
+            (compilation-history-view--render)
+            ;; Should show only matching record
+            (should (= (compilation-history-view-pagination-total-records
+                        compilation-history-view--pagination) 1))
+            (let ((content (buffer-string)))
+              (should (string-match-p "make test" content))
+              (should-not (string-match-p "npm run build" content)))
+            ;; Clear search
+            (setq compilation-history-view--search-term nil)
+            (compilation-history-view--render)
+            (should (= (compilation-history-view-pagination-total-records
+                        compilation-history-view--pagination) 2)))
+        (kill-buffer buf)))))
+
+(ert-deftest test-compilation-history-view-search-capf-completes-columns ()
+  "Search completion-at-point offers FTS column names."
+  (let ((completions (mapcar (lambda (col) (concat col ":"))
+                             compilation-history-view--fts-columns)))
+    (should (member "compile_command:" completions))
+    (should (member "output:" completions))
+    (should (member "default_directory:" completions))
+    (should (member "git_branch:" completions))))
+
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here

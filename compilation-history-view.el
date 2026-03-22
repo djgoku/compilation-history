@@ -206,7 +206,10 @@ INDEX is the 0-based row position within the current page."
   (let* ((inhibit-read-only t)
          (page-size (compilation-history-view-pagination-page-size
                      compilation-history-view--pagination))
-         (total (compilation-history--count-records))
+         (search compilation-history-view--search-term)
+         (total (if search
+                    (compilation-history--count-records-fts search)
+                  (compilation-history--count-records)))
          (pagination compilation-history-view--pagination))
     (setf (compilation-history-view-pagination-total-records pagination) total)
     ;; Clamp current page
@@ -215,7 +218,9 @@ INDEX is the 0-based row position within the current page."
         (setf (compilation-history-view-pagination-current-page pagination) max-page)))
     ;; Fetch data
     (let* ((offset (compilation-history-view--page-offset pagination))
-           (rows (compilation-history--query-page page-size offset))
+           (rows (if search
+                     (compilation-history--query-page-fts page-size offset search)
+                   (compilation-history--query-page page-size offset)))
            (objects (cl-loop for row in rows
                              for i from 0
                              collect (compilation-history-view--row-to-plist row i))))
@@ -233,7 +238,8 @@ INDEX is the 0-based row position within the current page."
                        "n"   #'compilation-history-view-preview-next
                        "p"   #'compilation-history-view-preview-prev
                        "M-n" #'compilation-history-view-preview-next
-                       "M-p" #'compilation-history-view-preview-prev)
+                       "M-p" #'compilation-history-view-preview-prev
+                       "s"   #'compilation-history-view-search)
              :insert t))
       (goto-char (point-max))
       (insert "\n")
@@ -251,6 +257,9 @@ INDEX is the 0-based row position within the current page."
     (setq mode-line-format
           (list " CompHist  "
                 (format "Page %d of %d (%d records)" current total-pages total-records)
+                (if compilation-history-view--search-term
+                    (format "  [search: %s]" compilation-history-view--search-term)
+                  "")
                 "  "
                 'mode-line-misc-info))))
 
@@ -428,8 +437,40 @@ No-op if preview mode is not active."
         (compilation-history-view--display-record object)
         (select-window view-window)))))
 
+(defconst compilation-history-view--fts-columns
+  '("compile_command" "default_directory" "git_branch" "output")
+  "Column names available for FTS column-specific searches.")
+
+(defun compilation-history-view--search-capf ()
+  "Completion-at-point function for FTS column names in search minibuffer."
+  (let* ((line (buffer-substring-no-properties (line-beginning-position) (point)))
+         ;; Complete at start of input or after a space
+         (start (if (string-match "\\(?:^\\|.* \\)\\([^ ]*\\)\\'" line)
+                    (- (point) (length (match-string 1 line)))
+                  (point))))
+    (list start (point)
+          (mapcar (lambda (col) (concat col ":"))
+                  compilation-history-view--fts-columns))))
+
 (defun compilation-history-view-search ()
-  "Search compilation history (not yet implemented)." (interactive) (message "Search not yet implemented"))
+  "Search compilation history using FTS.
+Supports substring matching and column-specific searches (e.g., compile_command:make).
+TAB completes column names. Empty input clears the search."
+  (interactive)
+  (let ((term (minibuffer-with-setup-hook
+                  (lambda ()
+                    (add-hook 'completion-at-point-functions
+                              #'compilation-history-view--search-capf nil t))
+                (read-from-minibuffer
+                 (if compilation-history-view--search-term
+                     (format "Search (current: %s): " compilation-history-view--search-term)
+                   "Search: ")))))
+    (setq compilation-history-view--search-term
+          (if (string-empty-p term) nil term))
+    ;; Reset to page 1 on new search
+    (setf (compilation-history-view-pagination-current-page
+           compilation-history-view--pagination) 1)
+    (compilation-history-view--render)))
 
 (defun compilation-history-view-quit ()
   "Quit the compilation history view.

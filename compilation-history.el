@@ -75,6 +75,37 @@
   );"
   "SQL schema for the compilations table.")
 
+(defconst compilation-history-db-fts-schema
+  "CREATE VIRTUAL TABLE IF NOT EXISTS compilations_fts USING fts5(
+    compile_command,
+    default_directory,
+    git_branch,
+    output,
+    content=compilations,
+    content_rowid=rowid,
+    tokenize='trigram'
+  );"
+  "SQL schema for the FTS5 full-text search table.
+Uses trigram tokenizer for substring matching.
+Indexes compile_command, default_directory, git_branch, and output.")
+
+(defconst compilation-history-db-fts-triggers
+  '("CREATE TRIGGER IF NOT EXISTS compilations_fts_insert AFTER INSERT ON compilations BEGIN
+      INSERT INTO compilations_fts(rowid, compile_command, default_directory, git_branch, output)
+      VALUES (new.rowid, new.compile_command, new.default_directory, new.git_branch, new.output);
+    END;"
+    "CREATE TRIGGER IF NOT EXISTS compilations_fts_delete AFTER DELETE ON compilations BEGIN
+      INSERT INTO compilations_fts(compilations_fts, rowid, compile_command, default_directory, git_branch, output)
+      VALUES('delete', old.rowid, old.compile_command, old.default_directory, old.git_branch, old.output);
+    END;"
+    "CREATE TRIGGER IF NOT EXISTS compilations_fts_update AFTER UPDATE ON compilations BEGIN
+      INSERT INTO compilations_fts(compilations_fts, rowid, compile_command, default_directory, git_branch, output)
+      VALUES('delete', old.rowid, old.compile_command, old.default_directory, old.git_branch, old.output);
+      INSERT INTO compilations_fts(rowid, compile_command, default_directory, git_branch, output)
+      VALUES (new.rowid, new.compile_command, new.default_directory, new.git_branch, new.output);
+    END;")
+  "SQL triggers to keep FTS5 index in sync with compilations table.")
+
 (cl-defstruct compilation-history compile-command record-id system-info buffer-name default-directory exit-code message)
 
 ;;; Buffer Name
@@ -174,11 +205,37 @@ doesn't match the compilation-history-record compile-command."
     (match-string 1 buffer-name)))
 
 (defun compilation-history--ensure-db ()
-  "Ensure the compilation history database exists and is properly initialized."
+  "Ensure the compilation history database exists and is properly initialized.
+Creates the main table, FTS5 virtual table, and sync triggers if they don't exist."
   (let ((db-dir (file-name-directory compilation-history-db-file)))
     (unless (file-directory-p db-dir)
       (make-directory db-dir t))
-    (compilation-history--execute-sql compilation-history-db-schema)))
+    (let ((db (sqlite-open compilation-history-db-file)))
+      (unwind-protect
+          (progn
+            (sqlite-execute db compilation-history-db-schema)
+            (sqlite-execute db compilation-history-db-fts-schema)
+            (dolist (trigger compilation-history-db-fts-triggers)
+              (sqlite-execute db trigger)))
+        (sqlite-close db)))))
+
+(defun compilation-history-rebuild-fts ()
+  "Drop and recreate the FTS5 table, triggers, and rebuild the index.
+Use this after upgrading the FTS schema (e.g., adding columns or changing tokenizer)."
+  (interactive)
+  (let ((db (sqlite-open compilation-history-db-file)))
+    (unwind-protect
+        (progn
+          (sqlite-execute db "DROP TRIGGER IF EXISTS compilations_fts_insert")
+          (sqlite-execute db "DROP TRIGGER IF EXISTS compilations_fts_delete")
+          (sqlite-execute db "DROP TRIGGER IF EXISTS compilations_fts_update")
+          (sqlite-execute db "DROP TABLE IF EXISTS compilations_fts")
+          (sqlite-execute db compilation-history-db-fts-schema)
+          (dolist (trigger compilation-history-db-fts-triggers)
+            (sqlite-execute db trigger))
+          (sqlite-execute db "INSERT INTO compilations_fts(compilations_fts) VALUES('rebuild')"))
+      (sqlite-close db)))
+  (message "FTS index rebuilt"))
 
 (defun compilation-history--execute-sql (sql &optional params)
   "Execute SQL statement with optional PARAMS on the compilation history database."
@@ -248,6 +305,66 @@ Each row includes a computed duration_seconds column appended at the end."
         (caar (sqlite-select db
                              "SELECT output FROM compilations WHERE id = ?"
                              (vector id)))
+      (sqlite-close db))))
+
+(defconst compilation-history--fts-column-names
+  '("compile_command" "default_directory" "git_branch" "output")
+  "FTS-indexed column names for LIKE fallback.")
+
+(defun compilation-history--search-needs-like-p (search-term)
+  "Return non-nil if SEARCH-TERM needs LIKE fallback (value < 3 chars).
+Handles both plain terms and column:value syntax."
+  (let ((value (if (string-match "\\`\\([a-z_]+\\):\\(.+\\)\\'" search-term)
+                   (match-string 2 search-term)
+                 search-term)))
+    (< (length value) 3)))
+
+(defun compilation-history--like-sql-parts (search-term)
+  "Parse SEARCH-TERM and return (where-clause . params) for LIKE query.
+Handles plain terms (searches all FTS columns) and column:value syntax."
+  (if (string-match "\\`\\([a-z_]+\\):\\(.+\\)\\'" search-term)
+      (let ((col (match-string 1 search-term))
+            (val (match-string 2 search-term)))
+        (cons (format "%s LIKE ?" col)
+              (vector (concat "%" val "%"))))
+    ;; Plain term: search across all FTS-indexed columns
+    (let ((clauses (mapcar (lambda (col) (format "%s LIKE ?" col))
+                           compilation-history--fts-column-names))
+          (pattern (concat "%" search-term "%")))
+      (cons (format "(%s)" (mapconcat #'identity clauses " OR "))
+            (apply #'vector (make-list (length compilation-history--fts-column-names) pattern))))))
+
+(defun compilation-history--count-records-fts (search-term)
+  "Return the number of compilation records matching SEARCH-TERM.
+Uses LIKE for short terms (< 3 chars), FTS otherwise."
+  (let ((db (sqlite-open compilation-history-db-file)))
+    (unwind-protect
+        (if (compilation-history--search-needs-like-p search-term)
+            (let ((parts (compilation-history--like-sql-parts search-term)))
+              (caar (sqlite-select db
+                                   (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
+                                   (cdr parts))))
+          (caar (sqlite-select db
+                               "SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
+                               (vector search-term))))
+      (sqlite-close db))))
+
+(defun compilation-history--query-page-fts (limit offset search-term)
+  "Return LIMIT matching records starting at OFFSET, newest first.
+Uses LIKE for short terms (< 3 chars), FTS otherwise."
+  (let ((db (sqlite-open compilation-history-db-file))
+        (duration-expr "CASE WHEN end_time IS NOT NULL AND start_time IS NOT NULL THEN (julianday(end_time) - julianday(start_time)) * 86400.0 ELSE NULL END AS duration_seconds"))
+    (unwind-protect
+        (if (compilation-history--search-needs-like-p search-term)
+            (let ((parts (compilation-history--like-sql-parts search-term)))
+              (sqlite-select db
+                             (format "SELECT *, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                     duration-expr (car parts))
+                             (vconcat (cdr parts) (vector limit offset))))
+          (sqlite-select db
+                         (format "SELECT *, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                 duration-expr)
+                         (vector search-term limit offset)))
       (sqlite-close db))))
 
 (defun compilation-history--finish-function (buffer status)
