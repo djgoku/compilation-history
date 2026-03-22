@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'vtable)
+(require 'color)
 (require 'compilation-history)
 
 ;;; Pagination
@@ -172,6 +173,16 @@ INDEX is the 0-based row position within the current page."
 
 ;;; Rendering
 
+(defun compilation-history-view--row-colors ()
+  "Return alternating row colors based on the current theme, or nil in batch mode."
+  (when (display-graphic-p)
+    (let ((bg (face-background 'default)))
+      (when bg
+        (list bg
+              (if (eq (frame-parameter nil 'background-mode) 'dark)
+                  (color-lighten-name bg 10)
+                (color-darken-name bg 5)))))))
+
 (defun compilation-history-view--make-vtable-columns ()
   "Build vtable column specs from `compilation-history-view-columns'."
   (mapcar (lambda (col-def)
@@ -205,6 +216,7 @@ INDEX is the 0-based row position within the current page."
              :columns (compilation-history-view--make-vtable-columns)
              :objects objects
              :use-header-line t
+             :row-colors (compilation-history-view--row-colors)
              :insert t))
       (goto-char (point-max))
       (insert "\n")
