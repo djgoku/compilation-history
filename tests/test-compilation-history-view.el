@@ -211,13 +211,10 @@
     (let ((buf (compilation-history-view)))
       (unwind-protect
           (with-current-buffer buf
-            ;; format-mode-line returns "" in batch mode (no frame/window),
-            ;; so inspect mode-line-format directly as a list of strings.
-            (let ((ml (mapconcat (lambda (x) (if (stringp x) x ""))
-                                 mode-line-format "")))
-              (should (string-match-p "CompHist" ml))
-              (should (string-match-p "Page 1 of 1" ml))
-              (should (string-match-p "(0 records)" ml))))
+            ;; Pagination info is now in mode-name (a string).
+            (should (string-match-p "CompHist" mode-name))
+            (should (string-match-p "Page 1 of 1" mode-name))
+            (should (string-match-p "(0 records)" mode-name)))
         (kill-buffer buf)))))
 
 (ert-deftest test-compilation-history-view-open-compilation ()

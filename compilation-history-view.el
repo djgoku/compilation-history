@@ -282,19 +282,20 @@ INDEX is the 0-based row position within the current page."
       (compilation-history-view--update-mode-line)))))
 
 (defun compilation-history-view--update-mode-line ()
-  "Update mode-line to show pagination info."
+  "Update mode-line to show pagination info via `mode-name'.
+Preserves the default `mode-line-format' so users keep standard
+mode-line segments (input method, narrowing, global modes, etc.)."
   (let* ((pagination compilation-history-view--pagination)
          (current (compilation-history-view-pagination-current-page pagination))
          (total-pages (compilation-history-view--total-pages pagination))
          (total-records (compilation-history-view-pagination-total-records pagination)))
-    (setq mode-line-format
-          (list " CompHist  "
-                (format "Page %d of %d (%d records)" current total-pages total-records)
-                (if compilation-history-view--search-term
-                    (format "  [search: %s]" compilation-history-view--search-term)
-                  "")
-                "  "
-                'mode-line-misc-info))))
+    (setq mode-name
+          (format "CompHist  Page %d of %d (%d records)%s"
+                  current total-pages total-records
+                  (if compilation-history-view--search-term
+                      (format "  [search: %s]" compilation-history-view--search-term)
+                    "")))
+    (force-mode-line-update)))
 
 (defun compilation-history-view--insert-pagination ()
   "Insert pagination controls below the vtable."
