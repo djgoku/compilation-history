@@ -91,8 +91,21 @@
          (col-commit '(:name "Commit" :key :commit)))
     (should (equal (compilation-history-view--get-value object col-command) "make test"))
     (should (equal (compilation-history-view--get-value object col-branch) "main"))
-    ;; Commit should be truncated to 7 chars
-    (should (equal (compilation-history-view--get-value object col-commit) "abc1234"))))
+    ;; Without formatter, getter returns raw value
+    (should (equal (compilation-history-view--get-value object col-commit) "abc1234def"))))
+
+(ert-deftest test-compilation-history-view--formatter-is-called ()
+  "Getter calls :formatter when present in column-def."
+  (let* ((object '(:id "id1" :commit "abc1234def" :directory "/Users/someone/project/" :row-index 0))
+         (col-commit '(:name "Commit" :key :commit :formatter compilation-history-view--format-commit))
+         (col-dir '(:name "Directory" :key :directory :formatter compilation-history-view--format-directory))
+         (col-custom '(:name "Test" :key :commit :formatter (lambda (v) (upcase v)))))
+    ;; Commit formatter truncates to 7 chars
+    (should (equal (compilation-history-view--get-value object col-commit) "abc1234"))
+    ;; Directory formatter abbreviates
+    (should (stringp (compilation-history-view--get-value object col-dir)))
+    ;; Custom lambda formatter works
+    (should (equal (compilation-history-view--get-value object col-custom) "ABC1234DEF"))))
 
 (ert-deftest test-compilation-history-view--getter-row-number ()
   "Row number getter computes from pagination offset + row-index."

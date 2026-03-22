@@ -48,15 +48,21 @@ Subtracts space for header-line and pagination controls."
 (defcustom compilation-history-view-columns
   '((:name "#" :key :row-number)
     (:name "Start Time" :key :start-time)
-    (:name "Duration" :key :duration)
+    (:name "Duration" :key :duration :min-width 8)
     (:name "Status" :key :status)
-    (:name "Exit" :key :exit-code)
-    (:name "Commit" :key :commit)
+    (:name "Exit" :key :exit-code :min-width 5)
+    (:name "Commit" :key :commit :formatter compilation-history-view--format-commit)
     (:name "Branch" :key :branch)
-    (:name "Directory" :key :directory)
+    (:name "Directory" :key :directory :formatter compilation-history-view--format-directory)
     (:name "Command" :key :command))
   "Column definitions for the compilation history view.
-Each entry is a plist with :name (display header) and :key (data field keyword).
+Each entry is a plist with:
+  :name      - display header
+  :key       - keyword identifying which data field to extract
+  :formatter - optional function to format the raw value for display
+  :min-width - optional minimum column width
+  :max-width - optional maximum column width
+  :align     - optional alignment (left or right)
 Users can reorder, remove, or modify entries. The getter dispatches on :key,
 so column order does not affect data access."
   :type '(repeat plist)
@@ -82,27 +88,41 @@ so column order does not affect data access."
 (defvar-local compilation-history-view--opened-buffers nil
   "List of compilation buffers opened from this view.")
 
+;;; Default Formatters
+
+(defun compilation-history-view--format-commit (value)
+  "Truncate commit hash VALUE to 7 characters."
+  (if (and value (> (length value) 7))
+      (substring value 0 7)
+    (or value "")))
+
+(defun compilation-history-view--format-directory (value)
+  "Abbreviate directory VALUE, replacing home directory with ~/."
+  (if value
+      (abbreviate-file-name value)
+    ""))
+
 ;;; Getter
 
 (defun compilation-history-view--get-value (object column-def)
   "Extract value from OBJECT plist for COLUMN-DEF.
-COLUMN-DEF is a plist with at least :key. Dispatches on :key."
-  (let ((key (plist-get column-def :key)))
-    (pcase key
-      (:row-number
-       (+ (compilation-history-view--page-offset
-           compilation-history-view--pagination)
-          (plist-get object :row-index)
-          1))
-      (:commit
-       (let ((val (plist-get object :commit)))
-         (if (and val (> (length val) 7))
-             (substring val 0 7)
-           (or val ""))))
-      (:duration
-       (compilation-history-view--format-duration (plist-get object :duration)))
-      (_
-       (or (plist-get object key) "")))))
+COLUMN-DEF is a plist with at least :key and optionally :formatter.
+If :formatter is set, the raw value is passed through it."
+  (let* ((key (plist-get column-def :key))
+         (formatter (plist-get column-def :formatter))
+         (raw (pcase key
+                (:row-number
+                 (+ (compilation-history-view--page-offset
+                     compilation-history-view--pagination)
+                    (plist-get object :row-index)
+                    1))
+                (:duration
+                 (compilation-history-view--format-duration (plist-get object :duration)))
+                (_
+                 (or (plist-get object key) "")))))
+    (if formatter
+        (funcall formatter raw)
+      raw)))
 
 ;;; Data Model
 
@@ -195,10 +215,16 @@ INDEX is the 0-based row position within the current page."
 (defun compilation-history-view--make-vtable-columns ()
   "Build vtable column specs from `compilation-history-view-columns'."
   (mapcar (lambda (col-def)
-            (let ((name (plist-get col-def :name)))
-              (list :name name
-                    :getter (lambda (object _table)
-                              (compilation-history-view--get-value object col-def)))))
+            (let ((spec (list :name (plist-get col-def :name)
+                              :getter (lambda (object _table)
+                                        (compilation-history-view--get-value object col-def)))))
+              (when-let* ((min-w (plist-get col-def :min-width)))
+                (setq spec (plist-put spec :min-width min-w)))
+              (when-let* ((max-w (plist-get col-def :max-width)))
+                (setq spec (plist-put spec :max-width max-w)))
+              (when-let* ((align (plist-get col-def :align)))
+                (setq spec (plist-put spec :align align)))
+              spec))
           compilation-history-view-columns))
 
 (defun compilation-history-view--render ()
