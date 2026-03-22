@@ -155,9 +155,14 @@ If :formatter is set, the raw value is passed through it."
 
 (defun compilation-history-view--format-duration (seconds)
   "Format SECONDS as a human-readable duration string.
+Under 60s: \"5.2s\".  Under 1h: \"2m 30s\".  Over 1h: \"1h 5m\".
 Returns empty string if SECONDS is nil."
   (if seconds
-      (format "%.1fs" seconds)
+      (let ((s (truncate seconds)))
+        (cond
+         ((< s 60) (format "%.1fs" seconds))
+         ((< s 3600) (format "%dm %ds" (/ s 60) (% s 60)))
+         (t (format "%dh %dm" (/ s 3600) (/ (% s 3600) 60)))))
     ""))
 
 (defun compilation-history-view--derive-status (exit-code killed end-time)

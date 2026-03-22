@@ -72,10 +72,19 @@
     (should (equal (plist-get plist :status) "running"))))
 
 (ert-deftest test-compilation-history-view--format-duration ()
-  "Duration formatting produces seconds with one decimal."
+  "Duration formatting uses human-readable units."
   (should (equal (compilation-history-view--format-duration nil) ""))
+  ;; Under 60s: decimal seconds
   (should (equal (compilation-history-view--format-duration 2.3) "2.3s"))
-  (should (equal (compilation-history-view--format-duration 65.0) "65.0s")))
+  (should (equal (compilation-history-view--format-duration 59.9) "59.9s"))
+  ;; 60s–3600s: minutes and seconds
+  (should (equal (compilation-history-view--format-duration 60.0) "1m 0s"))
+  (should (equal (compilation-history-view--format-duration 90.7) "1m 30s"))
+  (should (equal (compilation-history-view--format-duration 3599.0) "59m 59s"))
+  ;; Over 3600s: hours and minutes
+  (should (equal (compilation-history-view--format-duration 3600.0) "1h 0m"))
+  (should (equal (compilation-history-view--format-duration 3665.0) "1h 1m"))
+  (should (equal (compilation-history-view--format-duration 7384.0) "2h 3m")))
 
 (ert-deftest test-compilation-history-view--getter-dispatches-on-key ()
   "Getter extracts correct field from plist based on column :key."
