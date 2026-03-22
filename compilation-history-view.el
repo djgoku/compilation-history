@@ -37,6 +37,14 @@ Subtracts space for header-line and pagination controls."
 
 ;;; Column Configuration
 
+(defcustom compilation-history-view-split-direction 'horizontal
+  "How to split the window when opening compilation history items.
+`horizontal' splits above/below (horizontal divider),
+`vertical' splits side-by-side (vertical divider)."
+  :type '(choice (const :tag "Horizontal (above/below)" horizontal)
+                 (const :tag "Vertical (side-by-side)" vertical))
+  :group 'compilation-history)
+
 (defcustom compilation-history-view-columns
   '((:name "#" :key :row-number)
     (:name "Start Time" :key :start-time)
@@ -351,6 +359,13 @@ Reuses existing buffer if still alive, otherwise creates from database."
             (setq buffer-read-only t))
           buf))))
 
+(defun compilation-history-view--display-action ()
+  "Return a `display-buffer' action based on `compilation-history-view-split-direction'."
+  `(display-buffer-in-direction (inhibit-same-window . t)
+                                (direction . ,(if (eq compilation-history-view-split-direction 'horizontal)
+                                                  'below
+                                                'right))))
+
 (defun compilation-history-view--display-record (record)
   "Display compilation buffer for RECORD in the other window.
 When preview mode is active and the preview window is alive, reuses
@@ -361,7 +376,7 @@ Returns the displayed buffer."
     (if (and compilation-history-view--preview-window
             (window-live-p compilation-history-view--preview-window))
         (set-window-buffer compilation-history-view--preview-window buf)
-      (let ((win (display-buffer buf '(nil (inhibit-same-window . t)))))
+      (let ((win (display-buffer buf (compilation-history-view--display-action))))
         (with-current-buffer view-buf
           (setq compilation-history-view--preview-window win))))
     (with-current-buffer view-buf
