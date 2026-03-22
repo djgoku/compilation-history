@@ -450,22 +450,20 @@ Returns the displayed buffer."
     (message "No compilation record at point")))
 
 (defun compilation-history-view-preview-next ()
-  "Move to next row and preview it if preview mode is active.
-No-op if preview mode is not active."
+  "Move to next row. If preview mode is active, also update the other window."
   (interactive)
+  (forward-line 1)
   (when compilation-history-view--preview-mode
-    (forward-line 1)
     (when-let* ((object (vtable-current-object)))
       (let ((view-window (selected-window)))
         (compilation-history-view--display-record object)
         (select-window view-window)))))
 
 (defun compilation-history-view-preview-prev ()
-  "Move to previous row and preview it if preview mode is active.
-No-op if preview mode is not active."
+  "Move to previous row. If preview mode is active, also update the other window."
   (interactive)
+  (forward-line -1)
   (when compilation-history-view--preview-mode
-    (forward-line -1)
     (when-let* ((object (vtable-current-object)))
       (let ((view-window (selected-window)))
         (compilation-history-view--display-record object)
