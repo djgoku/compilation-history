@@ -267,6 +267,38 @@
         (when (get-buffer "*compilation-history-20260321T120000000001==proj__make*")
           (kill-buffer "*compilation-history-20260321T120000000001==proj__make*"))))))
 
+;;; Opening behavior tests
+
+(ert-deftest test-compilation-history-view-open-sets-compile-command ()
+  "Opening a record from the view sets compile-command to the record's command."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((buf-name "*compilation-history-20260321T120000000001==proj__make-test*"))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record
+        :record-id "20260321T120000000001"
+        :compile-command "make test"
+        :buffer-name buf-name
+        :default-directory "/tmp/project/"))
+      (compilation-history--update-compilation-record
+       "20260321T120000000001" 0 "test output")
+      (let ((view-buf (compilation-history-view)))
+        (unwind-protect
+            (progn
+              (with-current-buffer view-buf
+                (goto-char (point-min))
+                (when (vtable-current-object)
+                  (compilation-history-view-open)))
+              (let ((comp-buf (get-buffer buf-name)))
+                (should comp-buf)
+                (should (equal (buffer-local-value 'compile-command comp-buf)
+                               "make test"))
+                (should (equal (buffer-local-value 'compilation-directory comp-buf)
+                               "/tmp/project/"))))
+          (kill-buffer view-buf)
+          (when (get-buffer buf-name)
+            (kill-buffer buf-name)))))))
+
 (ert-deftest test-compilation-history-view-open-clears-preview ()
   "RET clears preview mode."
   (compilation-history-test-with-db

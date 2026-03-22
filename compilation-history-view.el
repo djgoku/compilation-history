@@ -337,6 +337,8 @@ Reuses existing buffer if still alive, otherwise creates from database."
               (erase-buffer)
               (when output (insert output)))
             (compilation-mode)
+            (setq-local compile-command (plist-get record :command))
+            (setq-local compilation-directory (plist-get record :directory))
             (setq buffer-read-only t))
           buf))))
 
