@@ -267,6 +267,55 @@
         (when (get-buffer "*compilation-history-20260321T120000000001==proj__make*")
           (kill-buffer "*compilation-history-20260321T120000000001==proj__make*"))))))
 
+(ert-deftest test-compilation-history-view-open-preserves-preview ()
+  "RET does not clear preview mode."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :buffer-name "*compilation-history-20260321T120000000001==proj__make*"))
+    (compilation-history--update-compilation-record
+     "20260321T120000000001" 0 "output")
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (goto-char (point-min))
+            (when (vtable-current-object)
+              (compilation-history-view-preview)
+              (should compilation-history-view--preview-mode)
+              (compilation-history-view-open)
+              (with-current-buffer buf
+                (should compilation-history-view--preview-mode))))
+        (kill-buffer buf)
+        (when (get-buffer "*compilation-history-20260321T120000000001==proj__make*")
+          (kill-buffer "*compilation-history-20260321T120000000001==proj__make*"))))))
+
+(ert-deftest test-compilation-history-view-quit-clears-preview-and-buries ()
+  "q in view clears preview mode and buries opened buffers."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :buffer-name "*compilation-history-20260321T120000000001==proj__make*"))
+    (compilation-history--update-compilation-record
+     "20260321T120000000001" 0 "output")
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (goto-char (point-min))
+            (when (vtable-current-object)
+              (compilation-history-view-preview)
+              (should compilation-history-view--preview-mode)
+              (should compilation-history-view--opened-buffers)
+              (compilation-history-view-quit)
+              (should-not compilation-history-view--preview-mode)
+              (should-not compilation-history-view--opened-buffers)))
+        (kill-buffer buf)
+        (when (get-buffer "*compilation-history-20260321T120000000001==proj__make*")
+          (kill-buffer "*compilation-history-20260321T120000000001==proj__make*"))))))
+
 ;;; Opening behavior tests
 
 (ert-deftest test-compilation-history-view-open-sets-compile-command ()
@@ -299,8 +348,66 @@
           (when (get-buffer buf-name)
             (kill-buffer buf-name)))))))
 
-(ert-deftest test-compilation-history-view-open-clears-preview ()
-  "RET clears preview mode."
+;;; Kill-buffer behavior tests
+
+(ert-deftest test-compilation-history-kill-buffer-with-exit-code-does-not-update-db ()
+  "Killing a compilation buffer that already has an exit code does not update the DB record."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let* ((record (compilation-history-test--make-record
+                    :record-id "20260321T120000000001"
+                    :buffer-name "*compilation-history-20260321T120000000001==proj__make*"
+                    :compile-command "make test")))
+      (compilation-history--insert-compilation-record record)
+      (compilation-history--update-compilation-record "20260321T120000000001" 0 "success output")
+      ;; Open the buffer from the view
+      (let ((view-buf (compilation-history-view)))
+        (unwind-protect
+            (with-current-buffer view-buf
+              (goto-char (point-min))
+              (when (vtable-current-object)
+                (compilation-history-view-open)
+                ;; Kill the opened compilation buffer
+                (let ((comp-buf (get-buffer "*compilation-history-20260321T120000000001==proj__make*")))
+                  (when comp-buf (kill-buffer comp-buf)))
+                ;; DB record should still have exit-code 0, not -1 (killed)
+                (let* ((page (compilation-history--query-page 1 0))
+                       (row (car page))
+                       (exit-code (nth 6 row))
+                       (killed (nth 7 row)))
+                  (should (= exit-code 0))
+                  (should (= killed 0)))))
+          (kill-buffer view-buf))))))
+
+(ert-deftest test-compilation-history-kill-buffer-without-exit-code-marks-killed ()
+  "Killing a compilation buffer with no exit code marks it as killed in the DB."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let* ((record (compilation-history-test--make-record
+                    :record-id "20260321T120000000001"
+                    :buffer-name "*compilation-history-20260321T120000000001==proj__make*"
+                    :compile-command "make test"))
+           (buf (get-buffer-create "*compilation-history-20260321T120000000001==proj__make*")))
+      (compilation-history--insert-compilation-record record)
+      ;; Simulate a running compilation buffer with the record but no exit code
+      (with-current-buffer buf
+        (setq-local compilation-history-record record)
+        (add-hook 'kill-buffer-hook #'compilation-history--kill-buffer-function nil t)
+        (insert "partial output"))
+      ;; Kill the buffer — should mark as killed
+      (kill-buffer buf)
+      ;; DB record should have exit-code -1 and killed=1
+      (let* ((page (compilation-history--query-page 1 0))
+             (row (car page))
+             (exit-code (nth 6 row))
+             (killed (nth 7 row)))
+        (should (= exit-code -1))
+        (should (= killed 1))))))
+
+;;; Vtable keymap override tests
+
+(ert-deftest test-compilation-history-view-vtable-keymap-has-our-bindings ()
+  "Vtable's keymap includes our key overrides so they work on table rows."
   (compilation-history-test-with-db
     (compilation-history--ensure-db)
     (compilation-history--insert-compilation-record
@@ -313,14 +420,70 @@
       (unwind-protect
           (with-current-buffer buf
             (goto-char (point-min))
-            (when (vtable-current-object)
-              (setq compilation-history-view--preview-mode t)
-              (compilation-history-view-open)
-              (with-current-buffer buf
-                (should-not compilation-history-view--preview-mode))))
+            ;; Get the text-property keymap from the vtable row
+            (let ((tp-keymap (get-text-property (point) 'keymap)))
+              (should tp-keymap)
+              (should (eq (lookup-key tp-keymap "g") #'compilation-history-view-refresh))
+              (should (eq (lookup-key tp-keymap "q") #'compilation-history-view-quit))
+              (should (eq (lookup-key tp-keymap "Q") #'compilation-history-view-kill-all))
+              (should (eq (lookup-key tp-keymap "n") #'compilation-history-view-preview-next))
+              (should (eq (lookup-key tp-keymap "p") #'compilation-history-view-preview-prev))
+              (should (eq (lookup-key tp-keymap (kbd "M-n")) #'compilation-history-view-preview-next))
+              (should (eq (lookup-key tp-keymap (kbd "M-p")) #'compilation-history-view-preview-prev))))
         (kill-buffer buf)
         (when (get-buffer "*compilation-history-20260321T120000000001==proj__make*")
           (kill-buffer "*compilation-history-20260321T120000000001==proj__make*"))))))
+
+(ert-deftest test-compilation-history-view-kill-all-kills-buffers ()
+  "Q kills all opened buffers and the view."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((comp-buf-name "*compilation-history-20260321T120000000001==proj__make*"))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record
+        :record-id "20260321T120000000001"
+        :buffer-name comp-buf-name))
+      (compilation-history--update-compilation-record
+       "20260321T120000000001" 0 "output")
+      (let ((view-buf (compilation-history-view)))
+        (with-current-buffer view-buf
+          (goto-char (point-min))
+          (when (vtable-current-object)
+            (compilation-history-view-preview)
+            (should (get-buffer comp-buf-name))
+            (compilation-history-view-kill-all)
+            ;; Opened compilation buffer should be killed
+            (should-not (get-buffer comp-buf-name))
+            ;; View buffer should be killed
+            (should-not (get-buffer "*Compilation History*"))))))))
+
+(ert-deftest test-compilation-history-view-quit-buries-opened-buffers ()
+  "q buries opened buffers (they still exist but are at end of buffer list)."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((comp-buf-name "*compilation-history-20260321T120000000001==proj__make*"))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record
+        :record-id "20260321T120000000001"
+        :buffer-name comp-buf-name))
+      (compilation-history--update-compilation-record
+       "20260321T120000000001" 0 "output")
+      (let ((view-buf (compilation-history-view)))
+        (unwind-protect
+            (with-current-buffer view-buf
+              (goto-char (point-min))
+              (when (vtable-current-object)
+                (compilation-history-view-preview)
+                (should (get-buffer comp-buf-name))
+                (compilation-history-view-quit)
+                ;; Buffer should still exist (buried, not killed)
+                (should (get-buffer comp-buf-name))
+                ;; But opened-buffers list should be cleared
+                (should-not compilation-history-view--opened-buffers)))
+          (when (get-buffer "*Compilation History*")
+            (kill-buffer "*Compilation History*"))
+          (when (get-buffer comp-buf-name)
+            (kill-buffer comp-buf-name)))))))
 
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here

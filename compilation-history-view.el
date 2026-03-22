@@ -71,6 +71,9 @@ so column order does not affect data access."
 (defvar-local compilation-history-view--preview-window nil
   "The window used for previewing compilation buffers.")
 
+(defvar-local compilation-history-view--opened-buffers nil
+  "List of compilation buffers opened from this view.")
+
 ;;; Getter
 
 (defun compilation-history-view--get-value (object column-def)
@@ -158,18 +161,16 @@ INDEX is the 0-based row position within the current page."
   "p"   #'compilation-history-view-preview-prev
   "M-n" #'compilation-history-view-preview-next
   "M-p" #'compilation-history-view-preview-prev
-  "s"   #'compilation-history-view-search)
+  "s"   #'compilation-history-view-search
+  "q"   #'compilation-history-view-quit
+  "Q"   #'compilation-history-view-kill-all)
 
 (define-derived-mode compilation-history-view-mode special-mode "CompHist"
   "Major mode for browsing compilation history."
   (display-line-numbers-mode -1)
   (setq-local revert-buffer-function
               (lambda (_ignore-auto _noconfirm)
-                (compilation-history-view-refresh)))
-  (add-hook 'post-command-hook #'compilation-history-view--check-preview-mode)
-  (add-hook 'kill-buffer-hook
-            (lambda () (remove-hook 'post-command-hook #'compilation-history-view--check-preview-mode))
-            nil t))
+                (compilation-history-view-refresh))))
 
 ;;; Rendering
 
@@ -217,6 +218,14 @@ INDEX is the 0-based row position within the current page."
              :objects objects
              :use-header-line t
              :row-colors (compilation-history-view--row-colors)
+             :keymap (define-keymap
+                       "g"   #'compilation-history-view-refresh
+                       "q"   #'compilation-history-view-quit
+                       "Q"   #'compilation-history-view-kill-all
+                       "n"   #'compilation-history-view-preview-next
+                       "p"   #'compilation-history-view-preview-prev
+                       "M-n" #'compilation-history-view-preview-next
+                       "M-p" #'compilation-history-view-preview-prev)
              :insert t))
       (goto-char (point-max))
       (insert "\n")
@@ -347,19 +356,21 @@ Reuses existing buffer if still alive, otherwise creates from database."
 When preview mode is active and the preview window is alive, reuses
 that window instead of opening a new one.
 Returns the displayed buffer."
-  (let ((buf (compilation-history-view--get-or-create-compilation-buffer record)))
+  (let ((view-buf (get-buffer "*Compilation History*"))
+        (buf (compilation-history-view--get-or-create-compilation-buffer record)))
     (if (and compilation-history-view--preview-window
             (window-live-p compilation-history-view--preview-window))
         (set-window-buffer compilation-history-view--preview-window buf)
       (let ((win (display-buffer buf '(nil (inhibit-same-window . t)))))
-        (setq compilation-history-view--preview-window win)))
+        (with-current-buffer view-buf
+          (setq compilation-history-view--preview-window win))))
+    (with-current-buffer view-buf
+      (cl-pushnew buf compilation-history-view--opened-buffers))
     buf))
 
 (defun compilation-history-view-open ()
   "Open the compilation record at point in other window and switch to it."
   (interactive)
-  (setq compilation-history-view--preview-mode nil)
-  (setq compilation-history-view--preview-window nil)
   (if-let* ((object (vtable-current-object)))
       (let* ((buf (compilation-history-view--display-record object))
              (win (get-buffer-window buf)))
@@ -372,9 +383,11 @@ Returns the displayed buffer."
   "Preview the compilation record at point without switching focus."
   (interactive)
   (if-let* ((object (vtable-current-object)))
-      (let ((view-window (selected-window)))
+      (let ((view-buf (current-buffer))
+            (view-window (selected-window)))
         (compilation-history-view--display-record object)
-        (setq compilation-history-view--preview-mode t)
+        (with-current-buffer view-buf
+          (setq compilation-history-view--preview-mode t))
         (select-window view-window))
     (message "No compilation record at point")))
 
@@ -403,14 +416,34 @@ No-op if preview mode is not active."
 (defun compilation-history-view-search ()
   "Search compilation history (not yet implemented)." (interactive) (message "Search not yet implemented"))
 
-(defun compilation-history-view--check-preview-mode ()
-  "Deactivate preview mode if the view buffer is no longer in the selected window."
-  (when-let* ((view-buf (get-buffer "*Compilation History*")))
-    (when (buffer-local-value 'compilation-history-view--preview-mode view-buf)
-      (unless (eq (window-buffer (selected-window)) view-buf)
-        (with-current-buffer view-buf
-          (setq compilation-history-view--preview-mode nil)
-          (setq compilation-history-view--preview-window nil))))))
+(defun compilation-history-view-quit ()
+  "Quit the compilation history view.
+Buries all compilation buffers opened from the view,
+then buries the view itself. Clears preview mode."
+  (interactive)
+  (setq compilation-history-view--preview-mode nil)
+  (setq compilation-history-view--preview-window nil)
+  (dolist (buf compilation-history-view--opened-buffers)
+    (when (buffer-live-p buf)
+      (let ((win (get-buffer-window buf)))
+        (when win (delete-window win)))
+      (bury-buffer buf)))
+  (setq compilation-history-view--opened-buffers nil)
+  (quit-window))
+
+(defun compilation-history-view-kill-all ()
+  "Kill all compilation-history buffers and the view itself."
+  (interactive)
+  (setq compilation-history-view--preview-mode nil)
+  (setq compilation-history-view--preview-window nil)
+  (setq compilation-history-view--opened-buffers nil)
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (string-prefix-p "*compilation-history-" (buffer-name buf)))
+      (let ((win (get-buffer-window buf)))
+        (when win (delete-window win)))
+      (kill-buffer buf)))
+  (kill-buffer))
 
 (provide 'compilation-history-view)
 ;;; compilation-history-view.el ends here
