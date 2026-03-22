@@ -161,7 +161,7 @@ INDEX is the 0-based row position within the current page."
 
 (define-derived-mode compilation-history-view-mode special-mode "CompHist"
   "Major mode for browsing compilation history."
-  (setq-local display-line-numbers nil)
+  (display-line-numbers-mode -1)
   (setq-local revert-buffer-function
               (lambda (_ignore-auto _noconfirm)
                 (compilation-history-view-refresh)))
