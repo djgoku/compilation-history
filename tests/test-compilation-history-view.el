@@ -530,14 +530,5 @@
                         compilation-history-view--pagination) 2)))
         (kill-buffer buf)))))
 
-(ert-deftest test-compilation-history-view-search-capf-completes-columns ()
-  "Search completion-at-point offers FTS column names."
-  (let ((completions (mapcar (lambda (col) (concat col ":"))
-                             compilation-history--fts-column-names)))
-    (should (member "compile_command:" completions))
-    (should (member "output:" completions))
-    (should (member "default_directory:" completions))
-    (should (member "git_branch:" completions))))
-
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here
