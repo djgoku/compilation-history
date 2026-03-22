@@ -139,5 +139,128 @@ INDEX is the 0-based row position within the current page."
           :commit git-commit
           :row-index (or index 0))))
 
+;;; Mode
+
+(defvar-keymap compilation-history-view-mode-map
+  :parent special-mode-map
+  "C-v" #'compilation-history-view-next-page
+  "M-v" #'compilation-history-view-prev-page
+  "<"   #'compilation-history-view-first-page
+  ">"   #'compilation-history-view-last-page
+  "g"   #'compilation-history-view-refresh
+  "RET" #'compilation-history-view-open
+  "SPC" #'compilation-history-view-preview
+  "n"   #'compilation-history-view-preview-next
+  "p"   #'compilation-history-view-preview-prev
+  "M-n" #'compilation-history-view-preview-next
+  "M-p" #'compilation-history-view-preview-prev
+  "s"   #'compilation-history-view-search)
+
+(define-derived-mode compilation-history-view-mode special-mode "CompHist"
+  "Major mode for browsing compilation history."
+  (setq-local display-line-numbers nil)
+  (setq-local revert-buffer-function
+              (lambda (_ignore-auto _noconfirm)
+                (compilation-history-view-refresh)))
+  (add-hook 'post-command-hook #'compilation-history-view--check-preview-mode)
+  (add-hook 'kill-buffer-hook
+            (lambda () (remove-hook 'post-command-hook #'compilation-history-view--check-preview-mode))
+            nil t))
+
+;;; Rendering
+
+(defun compilation-history-view--make-vtable-columns ()
+  "Build vtable column specs from `compilation-history-view-columns'."
+  (mapcar (lambda (col-def)
+            (let ((name (plist-get col-def :name)))
+              (list :name name
+                    :getter (lambda (object _table)
+                              (compilation-history-view--get-value object col-def)))))
+          compilation-history-view-columns))
+
+(defun compilation-history-view--render ()
+  "Render the vtable and pagination in the current buffer."
+  (let* ((inhibit-read-only t)
+         (page-size (compilation-history-view-pagination-page-size
+                     compilation-history-view--pagination))
+         (total (compilation-history--count-records))
+         (pagination compilation-history-view--pagination))
+    (setf (compilation-history-view-pagination-total-records pagination) total)
+    ;; Clamp current page
+    (let ((max-page (compilation-history-view--total-pages pagination)))
+      (when (> (compilation-history-view-pagination-current-page pagination) max-page)
+        (setf (compilation-history-view-pagination-current-page pagination) max-page)))
+    ;; Fetch data
+    (let* ((offset (compilation-history-view--page-offset pagination))
+           (rows (compilation-history--query-page page-size offset))
+           (objects (cl-loop for row in rows
+                             for i from 0
+                             collect (compilation-history-view--row-to-plist row i))))
+      (erase-buffer)
+      (setq compilation-history-view--vtable
+            (make-vtable
+             :columns (compilation-history-view--make-vtable-columns)
+             :objects objects
+             :use-header-line t
+             :insert t))
+      (goto-char (point-max))
+      (insert "\n")
+      (compilation-history-view--insert-pagination)
+      ;; Move point to first data row
+      (goto-char (point-min)))))
+
+(defun compilation-history-view--insert-pagination ()
+  "Insert pagination controls below the vtable."
+  (let* ((pagination compilation-history-view--pagination)
+         (current (compilation-history-view-pagination-current-page pagination))
+         (total-pages (compilation-history-view--total-pages pagination))
+         (total-records (compilation-history-view-pagination-total-records pagination)))
+    (insert (format "Page %d of %d (%d records)" current total-pages total-records))))
+
+;;;###autoload
+(defun compilation-history-view ()
+  "Open the compilation history view buffer."
+  (interactive)
+  (compilation-history--ensure-db)
+  (let ((buf (get-buffer-create "*Compilation History*")))
+    (with-current-buffer buf
+      (compilation-history-view-mode)
+      (setq compilation-history-view--pagination
+            (make-compilation-history-view-pagination :page-size 25))
+      (compilation-history-view--render))
+    (switch-to-buffer buf)
+    buf))
+
+;;; Navigation stubs (implemented in later tasks)
+
+(defun compilation-history-view-next-page ()
+  "Go to next page." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-prev-page ()
+  "Go to previous page." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-first-page ()
+  "Go to first page." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-last-page ()
+  "Go to last page." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-refresh ()
+  "Refresh the view." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-open ()
+  "Open record at point." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-preview ()
+  "Preview record at point." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-preview-next ()
+  "Preview next record." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-preview-prev ()
+  "Preview previous record." (interactive) (message "Not yet implemented"))
+(defun compilation-history-view-search ()
+  "Search compilation history (not yet implemented)." (interactive) (message "Search not yet implemented"))
+
+(defun compilation-history-view--check-preview-mode ()
+  "Deactivate preview mode if we've left the view buffer."
+  (unless (eq major-mode 'compilation-history-view-mode)
+    (when-let* ((view-buf (get-buffer "*Compilation History*")))
+      (with-current-buffer view-buf
+        (when compilation-history-view--preview-mode
+          (setq compilation-history-view--preview-mode nil))))))
+
 (provide 'compilation-history-view)
 ;;; compilation-history-view.el ends here

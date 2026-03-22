@@ -9,6 +9,7 @@
 
 (require 'ert)
 (require 'compilation-history-view)
+(require 'compilation-history-test-helper)
 
 (ert-deftest test-compilation-history-view-pagination-total-pages ()
   "Total pages is correctly derived from total-records and page-size."
@@ -103,6 +104,52 @@
     ;; Page 2, page-size 25, index 3 → row 29
     ;; Offset = (2-1)*25 = 25, then 25 + 3 + 1 = 29 (1-based row numbers)
     (should (= (compilation-history-view--get-value object col) 29))))
+
+(ert-deftest test-compilation-history-view-creates-buffer ()
+  "compilation-history-view creates buffer with correct mode."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (should (equal (buffer-name) "*Compilation History*"))
+            (should (eq major-mode 'compilation-history-view-mode))
+            (should buffer-read-only)
+            (should compilation-history-view--pagination))
+        (kill-buffer buf)))))
+
+(ert-deftest test-compilation-history-view-empty-db ()
+  "View handles empty database gracefully."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (should (= (compilation-history-view-pagination-total-records
+                        compilation-history-view--pagination) 0))
+            (should (= (compilation-history-view--total-pages
+                        compilation-history-view--pagination) 1)))
+        (kill-buffer buf)))))
+
+(ert-deftest test-compilation-history-view-displays-records ()
+  "View displays records from the database."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record
+      :record-id "20260321T120000000001"
+      :compile-command "make test"
+      :buffer-name "*compilation-history-20260321T120000000001==proj__make-test*"))
+    (compilation-history--update-compilation-record
+     "20260321T120000000001" 0 "test output")
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (should (= (compilation-history-view-pagination-total-records
+                        compilation-history-view--pagination) 1))
+            (let ((content (buffer-string)))
+              (should (string-match-p "make test" content))))
+        (kill-buffer buf)))))
 
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here
