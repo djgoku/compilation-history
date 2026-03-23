@@ -69,6 +69,20 @@
   :type 'integer
   :group 'compilation-history)
 
+(defcustom compilation-history-save-interval 10
+  "Seconds between periodic saves of compilation output.
+Set to nil to disable timer-based saving."
+  :type '(choice (integer :tag "Seconds")
+                 (const :tag "Disabled" nil))
+  :group 'compilation-history)
+
+(defcustom compilation-history-save-line-threshold 100
+  "Number of new output lines that trigger a save.
+Set to nil to disable line-based saving."
+  :type '(choice (integer :tag "Lines")
+                 (const :tag "Disabled" nil))
+  :group 'compilation-history)
+
 ;;; Buffer-local Variables
 
 (defvar compile-command)           ; built-in, silence byte-compiler
@@ -76,6 +90,15 @@
 
 (defvar-local compilation-history-record nil
   "The compilation-history record for this buffer.")
+
+(defvar-local compilation-history--save-timer nil
+  "Repeating timer for periodic output saves in this buffer.")
+
+(defvar-local compilation-history--unsaved-line-count 0
+  "Number of output lines received since last partial save.")
+
+(defvar-local compilation-history--output-dirty nil
+  "Non-nil when output has changed since last partial save.")
 
 ;;; Database Schema
 
