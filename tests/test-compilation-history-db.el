@@ -288,5 +288,22 @@
     ;; Column-specific with 3+ chars still uses FTS
     (should (= (compilation-history--count-records-fts "compile_command:make") 1))))
 
+(ert-deftest test-fts-search-special-characters-falls-back-to-like ()
+  "FTS search with special characters (e.g. s3://) falls back to LIKE instead of erroring."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((record (compilation-history-test--make-record
+                   :record-id "20260321T120000000001"
+                   :compile-command "aws s3 ls s3://my-bucket")))
+      (compilation-history--insert-compilation-record record)
+      (compilation-history--update-compilation-record
+       "20260321T120000000001" 0 "listing objects..." nil)
+      ;; This search term contains :// which is invalid FTS5 syntax
+      ;; Should fall back to LIKE and return results, not error
+      (should (= (compilation-history--count-records-fts "s3://") 1))
+      ;; Query should also work without error
+      (let ((rows (compilation-history--query-page-fts 10 0 "s3://")))
+        (should (= (length rows) 1))))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here

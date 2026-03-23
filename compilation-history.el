@@ -262,22 +262,17 @@ opening redundant connections within a call stack.")
 Reuses `compilation-history--db' if already open, otherwise opens
 a new connection and closes it when BODY completes.
 DB may be _ if the caller only needs the shared-connection benefit
-without referencing the handle directly.
-Signals `sqlite-error' are caught and reported via `message'."
+without referencing the handle directly."
   (declare (indent 1) (debug (symbolp body)))
   (let ((db-sym (if (eq db '_) (gensym "db") db)))
-    `(condition-case err
-         (if compilation-history--db
-             (let ((,db-sym compilation-history--db))
-               ,@body)
-           (let ((,db-sym (sqlite-open compilation-history-db-file)))
-             (let ((compilation-history--db ,db-sym))
-               (unwind-protect
-                   (progn ,@body)
-                 (sqlite-close ,db-sym)))))
-       (sqlite-error
-        (message "compilation-history: database error: %s" (error-message-string err))
-        nil))))
+    `(if compilation-history--db
+         (let ((,db-sym compilation-history--db))
+           ,@body)
+       (let ((,db-sym (sqlite-open compilation-history-db-file)))
+         (let ((compilation-history--db ,db-sym))
+           (unwind-protect
+               (progn ,@body)
+             (sqlite-close ,db-sym)))))))
 
 (defun compilation-history--extract-id-from-buffer-name (buffer-name)
   "Extract the timestamp ID from a compilation history buffer name."
@@ -390,21 +385,22 @@ Each row includes a computed duration_seconds column appended at the end."
 
 (defun compilation-history--search-needs-like-p (search-term)
   "Return non-nil if SEARCH-TERM needs LIKE fallback (value < 3 chars).
-Handles both plain terms and column:value syntax."
-  (let ((value (if (string-match "\\`\\([a-z_]+\\):\\(.+\\)\\'" search-term)
+Handles both plain terms and column:value syntax.
+Only recognizes column:value when the column is a valid FTS column name."
+  (let ((value (if (and (string-match "\\`\\([a-z_]+\\):\\(.+\\)\\'" search-term)
+                        (member (match-string 1 search-term) compilation-history--fts-column-names))
                    (match-string 2 search-term)
                  search-term)))
     (< (length value) 3)))
 
 (defun compilation-history--like-sql-parts (search-term)
   "Parse SEARCH-TERM and return (where-clause . params) for LIKE query.
-Handles plain terms (searches all FTS columns) and column:value syntax."
-  (if (string-match "\\`\\([a-z_]+\\):\\(.+\\)\\'" search-term)
+Handles plain terms (searches all FTS columns) and column:value syntax.
+Only recognizes column:value when the column is a valid FTS column name."
+  (if (and (string-match "\\`\\([a-z_]+\\):\\(.+\\)\\'" search-term)
+           (member (match-string 1 search-term) compilation-history--fts-column-names))
       (let ((col (match-string 1 search-term))
             (val (match-string 2 search-term)))
-        (unless (member col compilation-history--fts-column-names)
-          (user-error "Unknown search column: %s (valid: %s)"
-                      col (mapconcat #'identity compilation-history--fts-column-names ", ")))
         (cons (format "%s LIKE ?" col)
               (vector (concat "%" val "%"))))
     ;; Plain term: search across all FTS-indexed columns
@@ -416,34 +412,48 @@ Handles plain terms (searches all FTS columns) and column:value syntax."
 
 (defun compilation-history--count-records-fts (search-term)
   "Return the number of compilation records matching SEARCH-TERM.
-Uses LIKE for short terms (< 3 chars), FTS otherwise."
+Uses LIKE for short terms (< 3 chars), FTS otherwise.
+Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
   (compilation-history--with-db db
-    (if (compilation-history--search-needs-like-p search-term)
-        (let ((parts (compilation-history--like-sql-parts search-term)))
-          (caar (sqlite-select db
-                               (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
-                               (cdr parts))))
-      (caar (sqlite-select db
-                           "SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
-                           (vector search-term))))))
+    (let ((parts (compilation-history--like-sql-parts search-term)))
+      (or (if (compilation-history--search-needs-like-p search-term)
+              (caar (sqlite-select db
+                                   (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
+                                   (cdr parts)))
+            (or (caar (sqlite-select db
+                                     "SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
+                                     (vector search-term)))
+                ;; FTS returned nil — fall back to LIKE
+                (caar (sqlite-select db
+                                     (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
+                                     (cdr parts)))))
+          0))))
 
 (defun compilation-history--query-page-fts (limit offset search-term)
   "Return LIMIT matching records starting at OFFSET, newest first.
-Uses LIKE for short terms (< 3 chars), FTS otherwise."
+Uses LIKE for short terms (< 3 chars), FTS otherwise.
+Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
   (compilation-history--with-db db
-    (if (compilation-history--search-needs-like-p search-term)
-        (let ((parts (compilation-history--like-sql-parts search-term)))
+    (let ((parts (compilation-history--like-sql-parts search-term)))
+      (if (compilation-history--search-needs-like-p search-term)
           (sqlite-select db
                          (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
                                  compilation-history--page-columns
                                  compilation-history--duration-expr
                                  (car parts))
-                         (vconcat (cdr parts) (vector limit offset))))
-      (sqlite-select db
-                     (format "SELECT %s, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                             compilation-history--page-columns
-                             compilation-history--duration-expr)
-                     (vector search-term limit offset)))))
+                         (vconcat (cdr parts) (vector limit offset)))
+        (or (sqlite-select db
+                           (format "SELECT %s, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                   compilation-history--page-columns
+                                   compilation-history--duration-expr)
+                           (vector search-term limit offset))
+            ;; FTS returned nil — fall back to LIKE
+            (sqlite-select db
+                           (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                   compilation-history--page-columns
+                                   compilation-history--duration-expr
+                                   (car parts))
+                           (vconcat (cdr parts) (vector limit offset))))))))
 
 (defun compilation-history--finish-function (buffer status)
   "Finish function for compilation-finished-hook."

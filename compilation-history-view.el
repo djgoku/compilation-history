@@ -267,9 +267,10 @@ INDEX is the 0-based row position within the current page."
          (pagination compilation-history-view--pagination))
     ;; Single DB connection for both count and page query
     (compilation-history--with-db _
-      (let ((total (if search
-                       (compilation-history--count-records-fts search)
-                     (compilation-history--count-records))))
+      (let ((total (or (if search
+                          (compilation-history--count-records-fts search)
+                        (compilation-history--count-records))
+                      0)))
         (setf (compilation-history-view-pagination-total-records pagination) total))
       ;; Clamp current page
       (let ((max-page (compilation-history-view--total-pages pagination)))
