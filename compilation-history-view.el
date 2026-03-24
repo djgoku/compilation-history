@@ -450,7 +450,7 @@ Reuses existing buffer if still alive, otherwise creates from database."
               (when output (insert output)))
             (setq default-directory dir)
             (compilation-mode)
-            (setq-local compile-command cmd)
+            (with-no-warnings (setq-local compile-command cmd))
             (setq-local compilation-directory dir)
             (setq-local compilation-arguments (list cmd nil nil nil))
             (setq-local compilation-history-record
