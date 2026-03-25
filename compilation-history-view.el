@@ -74,7 +74,7 @@ Subtracts space for header-line and pagination controls."
     (:name "Commit" :key :commit :formatter compilation-history-view--format-commit)
     (:name "Branch" :key :branch)
     (:name "Directory" :key :directory :formatter compilation-history-view--format-directory)
-    (:name "Command" :key :command))
+    (:name "Command" :key :command :formatter compilation-history-view--format-command))
   "Column definitions for the compilation history view.
 Each entry is a plist with:
   :name      - display header
@@ -127,6 +127,12 @@ so column order does not affect data access."
   "Abbreviate directory VALUE, replacing home directory with ~/."
   (if value
       (abbreviate-file-name value)
+    ""))
+
+(defun compilation-history-view--format-command (command)
+  "Collapse whitespace in COMMAND to single spaces for display."
+  (if command
+      (replace-regexp-in-string "[[:space:]]+" " " (string-trim command))
     ""))
 
 ;;; Getter

@@ -113,6 +113,29 @@
     ;; Custom lambda formatter works
     (should (equal (compilation-history-view--get-value object col-custom) "ABC1234DEF"))))
 
+(ert-deftest test-compilation-history-view--format-command ()
+  "Command formatter collapses whitespace to single spaces."
+  ;; Multiple spaces
+  (should (equal (compilation-history-view--format-command "make  -j4") "make -j4"))
+  ;; Newlines
+  (should (equal (compilation-history-view--format-command "make\nclean") "make clean"))
+  ;; Mixed whitespace
+  (should (equal (compilation-history-view--format-command "make \t\n  clean") "make clean"))
+  ;; Leading/trailing whitespace
+  (should (equal (compilation-history-view--format-command "  make  ") "make"))
+  ;; Nil input
+  (should (equal (compilation-history-view--format-command nil) ""))
+  ;; Empty string
+  (should (equal (compilation-history-view--format-command "") ""))
+  ;; Whitespace-only input
+  (should (equal (compilation-history-view--format-command "   \t\n  ") "")))
+
+(ert-deftest test-compilation-history-view--command-formatter-in-getter ()
+  "Command formatter is applied through the column getter."
+  (let* ((object '(:id "id1" :command "make \n -j4" :row-index 0))
+         (col '(:name "Command" :key :command :formatter compilation-history-view--format-command)))
+    (should (equal (compilation-history-view--get-value object col) "make -j4"))))
+
 (ert-deftest test-compilation-history-view--getter-row-number ()
   "Row number getter computes from pagination offset + row-index."
   (let* ((object '(:id "id1" :command "make" :row-index 3))
