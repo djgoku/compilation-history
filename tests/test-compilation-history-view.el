@@ -39,10 +39,10 @@
   "Database row is converted to a plist with all fields."
   (let* (;; Simulate a SQLite row matching compilation-history--page-columns + duration:
          ;; id, buffer_name, compile_command, default_directory, start_time,
-         ;; end_time, exit_code, killed, git_branch, git_commit, duration_seconds
+         ;; end_time, exit_code, killed, git_branch, git_commit, comint, duration_seconds
          (row '("20260321T120000" "*compilation*" "make test" "/project/"
                 "2026-03-21 12:00:00" "2026-03-21 12:00:05" 0 0
-                "main" "abc1234def" 5.0))
+                "main" "abc1234def" 0 5.0))
          (plist (compilation-history-view--row-to-plist row 0)))
     (should (equal (plist-get plist :id) "20260321T120000"))
     (should (equal (plist-get plist :buffer-name) "*compilation*"))
@@ -57,17 +57,17 @@
   "Status is correctly derived from exit-code and killed fields."
   ;; Killed
   (let* ((row '("id1" "*buf*" "make" "/" "2026-03-21 12:00:00" "2026-03-21 12:00:05"
-                1 1 nil nil 5.0))
+                1 1 nil nil 0 5.0))
          (plist (compilation-history-view--row-to-plist row)))
     (should (equal (plist-get plist :status) "killed")))
   ;; Failure
   (let* ((row '("id2" "*buf*" "make" "/" "2026-03-21 12:00:00" "2026-03-21 12:00:05"
-                2 0 nil nil 5.0))
+                2 0 nil nil 0 5.0))
          (plist (compilation-history-view--row-to-plist row)))
     (should (equal (plist-get plist :status) "failure")))
   ;; Running (no end_time)
   (let* ((row '("id3" "*buf*" "make" "/" "2026-03-21 12:00:00" nil
-                nil 0 nil nil nil))
+                nil 0 nil nil 0 nil))
          (plist (compilation-history-view--row-to-plist row)))
     (should (equal (plist-get plist :status) "running"))))
 

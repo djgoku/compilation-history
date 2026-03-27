@@ -120,7 +120,8 @@ Set to nil to disable line-based saving."
     os TEXT,
     os_version TEXT,
     emacs_version TEXT,
-    output BLOB
+    output BLOB,
+    comint INTEGER DEFAULT 0
   );"
   "SQL schema for the compilations table.")
 
@@ -155,7 +156,7 @@ Indexes compile_command, default_directory, git_branch, and output.")
     END;")
   "SQL triggers to keep FTS5 index in sync with compilations table.")
 
-(cl-defstruct compilation-history command record-id system-info buffer-name compile-directory exit-code message)
+(cl-defstruct compilation-history command record-id system-info buffer-name compile-directory exit-code message comint)
 
 ;;; Buffer Name
 
@@ -322,7 +323,8 @@ Use after upgrading the FTS schema (e.g., adding columns)."
          (command (compilation-history-command record))
          (dir (compilation-history-compile-directory record))
          (system-info (compilation-history-system-info record))
-         (sql "INSERT INTO compilations (id, buffer_name, compile_command, default_directory, start_time, git_repo, git_branch, git_commit, git_commit_message, git_remote_urls, os, os_version, emacs_version) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)"))
+         (comint-flag (if (compilation-history-comint record) 1 0))
+         (sql "INSERT INTO compilations (id, buffer_name, compile_command, default_directory, start_time, git_repo, git_branch, git_commit, git_commit_message, git_remote_urls, os, os_version, emacs_version, comint) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?)"))
     (compilation-history--execute-sql
      sql
      (vector id
@@ -336,7 +338,8 @@ Use after upgrading the FTS schema (e.g., adding columns)."
              (json-encode (plist-get system-info :git-remote-urls))
              (symbol-name (plist-get system-info :os))
              (plist-get system-info :os-version)
-             (plist-get system-info :emacs-version)))))
+             (plist-get system-info :emacs-version)
+             comint-flag))))
 
 (defun compilation-history--update-compilation-record (id exit-code output &optional killed)
   "Update a compilation record with completion data."
@@ -356,7 +359,7 @@ Use after upgrading the FTS schema (e.g., adding columns)."
     (caar (sqlite-select db "SELECT COUNT(*) FROM compilations"))))
 
 (defconst compilation-history--page-columns
-  "id, buffer_name, compile_command, default_directory, start_time, end_time, exit_code, killed, git_branch, git_commit"
+  "id, buffer_name, compile_command, default_directory, start_time, end_time, exit_code, killed, git_branch, git_commit, comint"
   "Columns selected for page queries (excludes large output BLOB).")
 
 (defconst compilation-history--duration-expr
@@ -470,8 +473,8 @@ Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
         ;; Make comint buffers read-only and quittable after process exits
         (when (derived-mode-p 'comint-mode)
           (setq buffer-read-only t)
-          (local-set-key (kbd "q") #'quit-window)))
-      (setq-local compilation-arguments nil))))
+          (local-set-key (kbd "q") #'quit-window)
+          (local-set-key (kbd "g") #'recompile))))))
 
 (defun compilation-history--kill-buffer-function ()
   "Function to handle when compilation buffer is killed and exit-code is
@@ -581,7 +584,7 @@ Intended for use in `compilation-filter-hook'."
              (system-info (compilation-history--get-system-info default-directory)))
         (rename-buffer buffer-name)
         (compilation-history--ensure-db)
-        (setq-local compilation-history-record (make-compilation-history :record-id record-id :command command :system-info system-info :buffer-name buffer-name :compile-directory default-directory))
+        (setq-local compilation-history-record (make-compilation-history :record-id record-id :command command :system-info system-info :buffer-name buffer-name :compile-directory default-directory :comint (derived-mode-p 'comint-mode)))
         (add-hook 'compilation-finish-functions #'compilation-history--finish-function nil t)
         (compilation-history--insert-compilation-record compilation-history-record)
         (compilation-history-set-recompile-command)

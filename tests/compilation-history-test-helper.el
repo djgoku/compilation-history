@@ -42,6 +42,7 @@ Variables available in BODY: temp-dir, temp-db."
                                                  (buffer-name "*compilation-history-test*")
                                                  (command "make test")
                                                  (compile-directory "/tmp/")
+                                                 (comint nil)
                                                  (system-info '(:os darwin :emacs-version "29.1")))
   "Create a test compilation record with optional keyword arguments.
 All parameters are optional and have sensible test defaults."
@@ -50,7 +51,8 @@ All parameters are optional and have sensible test defaults."
    :command command
    :compile-directory compile-directory
    :record-id record-id
-   :system-info system-info))
+   :system-info system-info
+   :comint comint))
 
 (provide 'compilation-history-test-helper)
 ;;; compilation-history-test-helper.el ends here

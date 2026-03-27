@@ -185,7 +185,7 @@ ROW columns match `compilation-history--page-columns' with duration appended.
 INDEX is the 0-based row position within the current page."
   ;; Column order: id(0), buffer_name(1), compile_command(2), default_directory(3),
   ;; start_time(4), end_time(5), exit_code(6), killed(7),
-  ;; git_branch(8), git_commit(9), duration_seconds(10)
+  ;; git_branch(8), git_commit(9), comint(10), duration_seconds(11)
   (let* ((id (nth 0 row))
          (buffer-name (nth 1 row))
          (compile-command (nth 2 row))
@@ -196,7 +196,8 @@ INDEX is the 0-based row position within the current page."
          (killed (nth 7 row))
          (git-branch (nth 8 row))
          (git-commit (nth 9 row))
-         (duration (nth 10 row)))
+         (comint-flag (nth 10 row))
+         (duration (nth 11 row)))
     (list :id id
           :buffer-name buffer-name
           :command compile-command
@@ -208,6 +209,7 @@ INDEX is the 0-based row position within the current page."
           :status (compilation-history-view--derive-status exit-code killed end-time)
           :branch git-branch
           :commit git-commit
+          :comint comint-flag
           :row-index (or index 0))))
 
 ;;; Mode
@@ -453,7 +455,9 @@ Reuses existing buffer if still alive, otherwise creates from database."
         (let ((output (compilation-history--get-output id))
               (buf (get-buffer-create buf-name))
               (dir (plist-get record :directory))
-              (cmd (plist-get record :command)))
+              (cmd (plist-get record :command))
+              (comint-flag (and (plist-get record :comint)
+                                (not (zerop (plist-get record :comint))))))
           (with-current-buffer buf
             (let ((inhibit-read-only t))
               (erase-buffer)
@@ -462,14 +466,17 @@ Reuses existing buffer if still alive, otherwise creates from database."
             (compilation-mode)
             (with-no-warnings (setq-local compile-command cmd))
             (setq-local compilation-directory dir)
-            (setq-local compilation-arguments (list cmd nil nil nil))
+            (setq-local compilation-arguments (list cmd (when comint-flag t) nil nil))
             (setq-local compilation-history-record
                         (make-compilation-history
                          :record-id id
                          :command cmd
                          :buffer-name buf-name
-                         :compile-directory dir))
-            (setq buffer-read-only t))
+                         :compile-directory dir
+                         :comint comint-flag))
+            (setq buffer-read-only t)
+            (local-set-key (kbd "g") #'recompile)
+            (local-set-key (kbd "q") #'quit-window))
           buf))))
 
 (defun compilation-history-view--display-action ()
