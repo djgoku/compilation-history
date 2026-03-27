@@ -4,7 +4,8 @@ set -euo pipefail
 
 DEPS_DIR="${MISE_PROJECT_DIR:-.}/.melpa-deps"
 
-if [ -f "$DEPS_DIR/package-lint.el" ]; then
+# Early exit if already installed (glob matches versioned subdirectory)
+if compgen -G "$DEPS_DIR/package-lint-*/package-lint.el" >/dev/null 2>&1; then
   echo "Dependencies already installed in $DEPS_DIR"
   exit 0
 fi
@@ -12,12 +13,48 @@ fi
 echo "Installing package-lint into $DEPS_DIR..."
 mkdir -p "$DEPS_DIR"
 
-emacs --batch \
+# Discover the current package-lint version from MELPA archive.
+# package-refresh-contents only fetches the index — no tar extraction,
+# so the Emacs 29/30 container bug does not apply here.
+ERR_LOG=$(mktemp)
+trap 'rm -f "$ERR_LOG"' EXIT
+VERSION=$(emacs --batch \
   --eval "(require 'package)" \
-  --eval "(setq package-user-dir \"$DEPS_DIR\")" \
   --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
-  --eval "(package-initialize)" \
   --eval "(package-refresh-contents)" \
-  --eval "(package-install 'package-lint)"
+  --eval "(let* ((desc (cadr (assq 'package-lint package-archive-contents)))
+                 (v (package-desc-version desc)))
+            (princ (mapconcat #'number-to-string v \".\")))" \
+  2>"$ERR_LOG") || true
+
+if [ -z "$VERSION" ]; then
+  echo "ERROR: could not discover package-lint version from MELPA" >&2
+  cat "$ERR_LOG" >&2
+  rm -f "$ERR_LOG"
+  exit 1
+fi
+
+if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+  echo "ERROR: invalid version string: '$VERSION'" >&2
+  cat "$ERR_LOG" >&2
+  rm -f "$ERR_LOG"
+  exit 1
+fi
+rm -f "$ERR_LOG"
+
+echo "Found package-lint version: $VERSION"
+
+# Download and extract with system tools (bypasses package.el tar bug)
+TAR_FILE="$DEPS_DIR/package-lint-${VERSION}.tar"
+curl -fsSL "https://melpa.org/packages/package-lint-${VERSION}.tar" -o "$TAR_FILE"
+tar xf "$TAR_FILE" -C "$DEPS_DIR"
+rm -f "$TAR_FILE"
+
+# Byte-compile for faster loading
+PKG_DIR="$DEPS_DIR/package-lint-${VERSION}"
+emacs --batch \
+  -L "$PKG_DIR" \
+  -f batch-byte-compile \
+  "$PKG_DIR"/*.el || true
 
 echo "Dependencies installed to $DEPS_DIR"

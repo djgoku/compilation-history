@@ -6,6 +6,13 @@ set -euo pipefail
 DEPS_DIR="${MISE_PROJECT_DIR:-.}/.melpa-deps"
 PROJECT="${MISE_PROJECT_DIR:-.}"
 
+# Resolve the versioned package-lint directory (newest if multiple exist)
+PKG_LINT_DIR=$(compgen -G "$DEPS_DIR/package-lint-*" | sort -V | tail -1)
+if [ -z "$PKG_LINT_DIR" ]; then
+  echo "ERROR: package-lint not found in $DEPS_DIR" >&2
+  exit 1
+fi
+
 # Find all source .el files (exclude test files)
 src_files=()
 for f in "$PROJECT"/compilation-history*.el; do
@@ -20,11 +27,7 @@ echo "Running package-lint on: ${src_files[*]##*/}"
 
 emacs --batch \
   -L "$PROJECT" \
-  -L "$DEPS_DIR" \
-  --eval "(require 'package)" \
-  --eval "(setq package-user-dir \"$DEPS_DIR\")" \
-  --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
-  --eval "(package-initialize)" \
+  -L "$PKG_LINT_DIR" \
   --eval "(require 'package-lint)" \
   -f package-lint-batch-and-exit \
   "${src_files[@]}"

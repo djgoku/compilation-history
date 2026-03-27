@@ -6,6 +6,13 @@ set -euo pipefail
 DEPS_DIR="${MISE_PROJECT_DIR:-.}/.melpa-deps"
 PROJECT="${MISE_PROJECT_DIR:-.}"
 
+# Resolve versioned package-lint directory (newest if multiple exist)
+PKG_LINT_DIR=$(compgen -G "$DEPS_DIR/package-lint-*" 2>/dev/null | sort -V | tail -1) || true
+EXTRA_LOAD_PATH=""
+if [ -n "$PKG_LINT_DIR" ]; then
+  EXTRA_LOAD_PATH="-L $PKG_LINT_DIR"
+fi
+
 # Find all source .el files (exclude test files)
 src_files=()
 for f in "$PROJECT"/compilation-history*.el; do
@@ -24,7 +31,7 @@ for src in "${src_files[@]}"; do
 
   output=$(emacs --batch \
     -L "$PROJECT" \
-    -L "$DEPS_DIR" \
+    $EXTRA_LOAD_PATH \
     -f batch-byte-compile "$src" 2>&1)
 
   if echo "$output" | grep -qi "error"; then
