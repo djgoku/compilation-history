@@ -218,7 +218,8 @@ If START-TIME is non-nil, return it unchanged."
                 (list :git-repo git-repo
                       :git-branch (car (vc-git-branches))
                       :git-commit (vc-git-working-revision dir)
-                      :git-commit-message (vc-git-get-change-comment dir "HEAD")
+                      :git-commit-message (when (fboundp 'vc-git-get-change-comment)
+                                           (vc-git-get-change-comment dir "HEAD"))
                       :git-remote-urls (compilation-history--get-git-remote-urls)))
       info)))
 
