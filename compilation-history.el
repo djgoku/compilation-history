@@ -372,7 +372,7 @@ Use after upgrading the FTS schema (e.g., adding columns)."
     (caar (sqlite-select db "SELECT COUNT(*) FROM compilations"))))
 
 (defconst compilation-history--page-columns
-  "id, buffer_name, compile_command, default_directory, start_time, end_time, exit_code, killed, git_branch, git_commit, comint"
+  "id, buffer_name, compile_command, default_directory, datetime(start_time, COALESCE(utc_offset, 0) || ' minutes') AS start_time, end_time, exit_code, killed, git_branch, git_commit, comint"
   "Columns selected for page queries (excludes large output BLOB).")
 
 (defconst compilation-history--duration-expr

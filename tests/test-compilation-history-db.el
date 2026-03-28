@@ -321,5 +321,24 @@
         ;; Should be in valid range
         (should (<= -720 (car row) 840))))))
 
+(ert-deftest test-compilation-history--query-page-converts-start-time ()
+  "Query page returns start_time converted to local time using utc_offset."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((record (compilation-history-test--make-record
+                   :record-id "20260321T120000000001")))
+      (compilation-history--insert-compilation-record record)
+      ;; Manually set a known start_time and offset for predictable testing
+      (let ((db (sqlite-open compilation-history-db-file)))
+        (sqlite-execute db "UPDATE compilations SET start_time = '2026-03-28 16:30:00', utc_offset = -300 WHERE id = ?"
+                        (vector "20260321T120000000001"))
+        (sqlite-close db))
+      ;; Query should return the converted local time
+      (let* ((page (compilation-history--query-page 1 0))
+             (row (car page))
+             ;; start_time is at index 4 in page-columns
+             (start-time (nth 4 row)))
+        (should (equal start-time "2026-03-28 11:30:00"))))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here
