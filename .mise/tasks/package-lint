@@ -3,15 +3,14 @@
 #MISE depends=["deps"]
 set -euo pipefail
 
-DEPS_DIR="${MISE_PROJECT_DIR:-.}/.melpa-deps"
+DEPS_DIR="${MISE_PROJECT_DIR:-.}/.elpaca"
 PROJECT="${MISE_PROJECT_DIR:-.}"
 
-# Resolve the versioned package-lint directory (newest if multiple exist)
-PKG_LINT_DIR=$(compgen -G "$DEPS_DIR/package-lint-*" | sort -V | tail -1)
-if [ -z "$PKG_LINT_DIR" ]; then
-  echo "ERROR: package-lint not found in $DEPS_DIR" >&2
-  exit 1
-fi
+# Build load path from all Elpaca-installed packages
+LOAD_PATHS=()
+for dir in "$DEPS_DIR"/builds/*/; do
+  [ -d "$dir" ] && LOAD_PATHS+=("-L" "$dir")
+done
 
 # Find all source .el files (exclude test files)
 src_files=()
@@ -27,7 +26,7 @@ echo "Running package-lint on: ${src_files[*]##*/}"
 
 emacs --batch \
   -L "$PROJECT" \
-  -L "$PKG_LINT_DIR" \
+  "${LOAD_PATHS[@]}" \
   --eval "(require 'package-lint)" \
   -f package-lint-batch-and-exit \
   "${src_files[@]}"

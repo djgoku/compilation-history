@@ -3,15 +3,14 @@
 #MISE depends=["deps"]
 set -euo pipefail
 
-DEPS_DIR="${MISE_PROJECT_DIR:-.}/.melpa-deps"
+DEPS_DIR="${MISE_PROJECT_DIR:-.}/.elpaca"
 PROJECT="${MISE_PROJECT_DIR:-.}"
 
-# Resolve versioned package-lint directory (newest if multiple exist)
-PKG_LINT_DIR=$(compgen -G "$DEPS_DIR/package-lint-*" 2>/dev/null | sort -V | tail -1) || true
-EXTRA_LOAD_PATH=""
-if [ -n "$PKG_LINT_DIR" ]; then
-  EXTRA_LOAD_PATH="-L $PKG_LINT_DIR"
-fi
+# Build load path from all Elpaca-installed packages
+LOAD_PATHS=()
+for dir in "$DEPS_DIR"/builds/*/; do
+  [ -d "$dir" ] && LOAD_PATHS+=("-L" "$dir")
+done
 
 # Find all source .el files (exclude test files)
 src_files=()
@@ -31,7 +30,7 @@ for src in "${src_files[@]}"; do
 
   output=$(emacs --batch \
     -L "$PROJECT" \
-    $EXTRA_LOAD_PATH \
+    "${LOAD_PATHS[@]}" \
     -f batch-byte-compile "$src" 2>&1)
 
   if echo "$output" | grep -qi "error"; then
