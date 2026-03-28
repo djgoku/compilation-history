@@ -15,13 +15,6 @@ check_task:
     - env:
         EMACS_VERSION: "master"
   allow_failures: $EMACS_VERSION == 'master'
-  setup_git_script:
-    - rm -f .git
-    - git init .
-    - git config user.email "ci@test"
-    - git config user.name "CI"
-    - git add -A
-    - git commit -m "ci"
   check_script:
     - emacs --version
     - mise run check
