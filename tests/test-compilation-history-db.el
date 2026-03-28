@@ -340,5 +340,18 @@
              (start-time (nth 4 row)))
         (should (equal start-time "2026-03-28 11:30:00"))))))
 
+(ert-deftest test-compilation-history--saves-ansi-codes-in-output ()
+  "Output saved to database preserves ANSI escape codes."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((record (compilation-history-test--make-record
+                   :record-id "20260321T120000000001")))
+      (compilation-history--insert-compilation-record record)
+      (compilation-history--update-compilation-record
+       "20260321T120000000001" 0
+       "header\n\033[32mPASS\033[0m test_one\nfooter\n")
+      (let ((output (compilation-history--get-output "20260321T120000000001")))
+        (should (string-match-p "\033\\[32m" output))))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here

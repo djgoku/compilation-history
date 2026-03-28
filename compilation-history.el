@@ -103,6 +103,9 @@ Set to nil to disable line-based saving."
 (defvar-local compilation-history--raw-output ""
   "Accumulated raw process output with ANSI escape codes intact.")
 
+(defvar-local compilation-history--header nil
+  "Buffer header content captured before first process output.")
+
 ;;; Database Schema
 
 (defconst compilation-history-db-schema
@@ -500,7 +503,18 @@ Adds recompile and quit bindings and sets the buffer read-only."
       ;; Cancel incremental save — final save captures everything
       (compilation-history--cancel-save-timer)
       (remove-hook 'compilation-filter-hook #'compilation-history--track-output t)
-      (let* ((output (buffer-substring-no-properties (point-min) (point-max)))
+      (remove-hook 'compilation-filter-hook #'compilation-history--capture-raw-output t)
+      (let* ((footer (buffer-substring-no-properties
+                      (save-excursion
+                        (goto-char (point-max))
+                        (forward-line -2)
+                        (line-beginning-position))
+                      (point-max)))
+             (output (if compilation-history--header
+                         (concat compilation-history--header
+                                 compilation-history--raw-output
+                                 footer)
+                       (buffer-substring-no-properties (point-min) (point-max))))
              (killed (string-match-p "killed\|interrupt" status))
              (exit-code (compilation-history-exit-code (buffer-local-value 'compilation-history-record buffer))))
         (compilation-history--update-compilation-record record-id exit-code output killed)
@@ -513,7 +527,10 @@ Avoids marking a record as killed when it already exited successfully."
   (when (and (boundp 'compilation-history-record) compilation-history-record)
     (unless (compilation-history-exit-code compilation-history-record)
       (when-let* ((record-id (compilation-history-record-id compilation-history-record)))
-        (let ((output (buffer-substring-no-properties (point-min) (point-max))))
+        (let ((output (if compilation-history--header
+                          (concat compilation-history--header
+                                  compilation-history--raw-output)
+                        (buffer-substring-no-properties (point-min) (point-max)))))
           (compilation-history--update-compilation-record record-id -1 output t))))))
 
 (defun compilation-history--add-sentinel-metadata-advice (proc msg)
@@ -552,7 +569,10 @@ No-op if BUFFER is dead, has no record, or output hasn't changed."
       (when (and (boundp 'compilation-history-record)
                  compilation-history-record
                  compilation-history--output-dirty)
-        (let ((output (buffer-substring-no-properties (point-min) (point-max)))
+        (let ((output (if compilation-history--header
+                          (concat compilation-history--header
+                                  compilation-history--raw-output)
+                        (buffer-substring-no-properties (point-min) (point-max))))
               (record-id (compilation-history-record-id compilation-history-record)))
           (compilation-history--execute-sql
            "UPDATE compilations SET output = ? WHERE id = ?"
@@ -603,6 +623,7 @@ for line-threshold saves."
   (setq-local compilation-history--unsaved-line-count 0)
   (setq-local compilation-history--output-dirty nil)
   (setq-local compilation-history--raw-output "")
+  (setq-local compilation-history--header (buffer-substring-no-properties (point-min) (point-max)))
   (add-hook 'compilation-filter-hook #'compilation-history--capture-raw-output -90 t)
   (compilation-history--restart-save-timer)
   (when compilation-history-save-line-threshold
