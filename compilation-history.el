@@ -159,6 +159,10 @@ Indexes compile_command, default_directory, git_branch, and output.")
     END;")
   "SQL triggers to keep FTS5 index in sync with compilations table.")
 
+(defconst compilation-history-db-indexes
+  '("CREATE INDEX IF NOT EXISTS idx_compilations_start_time ON compilations(start_time DESC)")
+  "SQL indexes for the compilations table.")
+
 (cl-defstruct compilation-history command record-id system-info buffer-name compile-directory exit-code message comint)
 
 (defun compilation-history--utc-offset-minutes ()
@@ -304,7 +308,9 @@ if they don't exist."
       (sqlite-execute db compilation-history-db-schema)
       (sqlite-execute db compilation-history-db-fts-schema)
       (dolist (trigger compilation-history-db-fts-triggers)
-        (sqlite-execute db trigger)))))
+        (sqlite-execute db trigger))
+      (dolist (index compilation-history-db-indexes)
+        (sqlite-execute db index)))))
 
 (defun compilation-history-rebuild-fts ()
   "Drop and recreate the FTS5 table and triggers.
