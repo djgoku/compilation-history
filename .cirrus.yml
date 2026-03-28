@@ -16,5 +16,5 @@ check_task:
         EMACS_VERSION: "master"
   allow_failures: $EMACS_VERSION == 'master'
   check_script:
-    - emacs --version
+    - emacs --batch --eval "(message (with-temp-buffer (emacs-build-description) (buffer-string)))"
     - mise run check
