@@ -63,6 +63,12 @@
 (elpaca-process-queues)
 (elpaca-wait)
 
+;; Verify installation succeeded
+(unless (file-exists-p
+         (expand-file-name ".elpaca/builds/package-lint/package-lint.el"
+                           user-emacs-directory))
+  (error "package-lint failed to install"))
+
 (message "Dependencies installed to .elpaca/")
 
 ;;; elpaca-bootstrap.el ends here
