@@ -459,6 +459,16 @@ Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
                                    (car parts))
                            (vconcat (cdr parts) (vector limit offset))))))))
 
+(define-minor-mode compilation-history-buffer-mode
+  "Minor mode for completed compilation-history buffers.
+Adds recompile and quit bindings and sets the buffer read-only."
+  :lighter nil
+  :keymap (define-keymap
+            "g" #'recompile
+            "q" #'quit-window)
+  (when compilation-history-buffer-mode
+    (setq buffer-read-only t)))
+
 (defun compilation-history--finish-function (buffer status)
   "Finish function for compilation-finished-hook."
   (when-let* ((record-id (compilation-history-record-id (buffer-local-value 'compilation-history-record buffer))))
@@ -470,11 +480,7 @@ Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
              (killed (string-match-p "killed\|interrupt" status))
              (exit-code (compilation-history-exit-code (buffer-local-value 'compilation-history-record buffer))))
         (compilation-history--update-compilation-record record-id exit-code output killed)
-        ;; Make comint buffers read-only and quittable after process exits
-        (when (derived-mode-p 'comint-mode)
-          (setq buffer-read-only t)
-          (local-set-key (kbd "q") #'quit-window)
-          (local-set-key (kbd "g") #'recompile))))))
+        (compilation-history-buffer-mode 1)))))
 
 (defun compilation-history--kill-buffer-function ()
   "Function to handle when compilation buffer is killed and exit-code is

@@ -729,7 +729,7 @@ compile-command in the original buffer via setcar on compilation-arguments."
         (setq compilation-history-db-file orig-db-file)))))
 
 (ert-deftest test-comint-buffer-read-only-after-finish ()
-  "Test that comint compilation buffers become read-only with q bound to quit-window after finish."
+  "Test that comint compilation buffers become read-only with buffer-mode after finish."
   (compilation-history-test-with-db
     (compilation-history-init)
     (let ((buffer (generate-new-buffer "*test-comint-finish*")))
@@ -747,12 +747,14 @@ compile-command in the original buffer via setcar on compilation-arguments."
             (compilation-history--finish-function buffer "finished\n")
             ;; Should be read-only after finish
             (should buffer-read-only)
-            ;; q should be bound to quit-window
-            (should (eq (local-key-binding (kbd "q")) #'quit-window)))
+            ;; Minor mode should be active
+            (should compilation-history-buffer-mode)
+            ;; q should be bound to quit-window via minor mode
+            (should (eq (key-binding (kbd "q")) #'quit-window)))
         (kill-buffer buffer)))))
 
-(ert-deftest test-non-comint-buffer-no-quit-binding-after-finish ()
-  "Test that non-comint compilation buffers don't get q bound to quit-window."
+(ert-deftest test-non-comint-buffer-mode-after-finish ()
+  "Test that non-comint compilation buffers also get buffer-mode after finish."
   (compilation-history-test-with-db
     (compilation-history-init)
     (let ((buffer (generate-new-buffer "*test-non-comint-finish*")))
@@ -765,8 +767,12 @@ compile-command in the original buffer via setcar on compilation-arguments."
             (insert "some output\n")
             ;; Simulate compilation finishing
             (compilation-history--finish-function buffer "finished\n")
-            ;; q should NOT be locally bound to quit-window
-            (should-not (eq (local-key-binding (kbd "q")) #'quit-window)))
+            ;; Minor mode should be active
+            (should compilation-history-buffer-mode)
+            ;; q should be bound via minor mode
+            (should (eq (key-binding (kbd "q")) #'quit-window))
+            ;; g should be bound to recompile via minor mode
+            (should (eq (key-binding (kbd "g")) #'recompile)))
         (kill-buffer buffer)))))
 
 (provide 'test-compilation-history-core)

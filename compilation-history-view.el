@@ -474,9 +474,7 @@ Reuses existing buffer if still alive, otherwise creates from database."
                          :buffer-name buf-name
                          :compile-directory dir
                          :comint comint-flag))
-            (setq buffer-read-only t)
-            (local-set-key (kbd "g") #'recompile)
-            (local-set-key (kbd "q") #'quit-window))
+            (compilation-history-buffer-mode 1))
           buf))))
 
 (defun compilation-history-view--display-action ()
