@@ -382,7 +382,7 @@ mode-line segments (input method, narrowing, global modes, etc.)."
                 (propertize "Q" 'face 'shadow) ":kill-all")))))
 
 (defun compilation-history-view--insert-button (label action &optional disabled)
-  "Insert a text button with LABEL that calls ACTION.
+  "Insert a text button with LABEL that call ACTION.
 When DISABLED is non-nil, button is dimmed and non-interactive."
   (if disabled
       (insert (propertize (format "[%s]" label) 'face 'shadow))
