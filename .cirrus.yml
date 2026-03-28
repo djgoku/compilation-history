@@ -1,8 +1,8 @@
 env:
   MISE_YES: "1"
 
-test_task:
-  name: "Test (Emacs ${EMACS_VERSION})"
+check_task:
+  name: "Check (Emacs ${EMACS_VERSION})"
   container:
     dockerfile: .cirrus.Dockerfile
     docker_arguments:
@@ -22,26 +22,6 @@ test_task:
     - git config user.name "CI"
     - git add -A
     - git commit -m "ci"
-  test_script:
+  check_script:
     - emacs --version
-    - mise run test
-
-lint_task:
-  name: "Lint (Emacs ${EMACS_VERSION})"
-  container:
-    dockerfile: .cirrus.Dockerfile
-    docker_arguments:
-      EMACS_VERSION: ${EMACS_VERSION}
-  matrix:
-    - env:
-        EMACS_VERSION: "29.4"
-    - env:
-        EMACS_VERSION: "30.1"
-    - env:
-        EMACS_VERSION: "master"
-  allow_failures: $EMACS_VERSION == 'master'
-  lint_script:
-    - emacs --version
-    - MISE_TASK_SKIP_DEPENDS=true mise run byte-compile
-    - mise run checkdoc
-    - mise run package-lint
+    - mise run check
