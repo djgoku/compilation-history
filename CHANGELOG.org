@@ -1,5 +1,9 @@
 #+TITLE: Changelog
 
+* [0.2.1] - 2026-03-29
+** Added
+- make directory column a clickable link to dired
+
 * [0.2.0] - 2026-03-29
 ** Breaking
 - add release automation script with ZeroVer support
