@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Run ERT test suite in batch mode"
+set -euo pipefail
+
+PROJECT="${MISE_PROJECT_DIR:-.}"
+
+echo "Running ERT tests..."
+
+load_args=(-L "$PROJECT" -L "$PROJECT/tests")
+
+# Load the helper first, then all test files
+load_args+=(-l compilation-history)
+if [ -f "$PROJECT/tests/compilation-history-test-helper.el" ]; then
+  load_args+=(-l compilation-history-test-helper)
+fi
+
+for test_file in "$PROJECT"/tests/test-*.el; do
+  [ -f "$test_file" ] || continue
+  load_args+=(-l "$test_file")
+done
+
+emacs --batch "${load_args[@]}" -f ert-run-tests-batch-and-exit

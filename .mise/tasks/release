@@ -1,0 +1,285 @@
+#!/usr/bin/env bash
+#MISE description="Bump version, update changelog, tag, and release"
+#MISE tools={gh="latest"}
+set -euo pipefail
+
+# Requires bash 4.3+ for nameref support
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3))); then
+  echo "Error: bash 4.3+ required (found $BASH_VERSION)" >&2
+  exit 1
+fi
+
+PROJECT="${MISE_PROJECT_DIR:-.}"
+
+EL_FILES=(
+  "$PROJECT/compilation-history.el"
+  "$PROJECT/compilation-history-view.el"
+)
+
+DRY_RUN=false
+NO_BRANCH_CHECK=false
+LOCAL_ONLY=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --no-branch-check) NO_BRANCH_CHECK=true ;;
+    --local-only) LOCAL_ONLY=true ;;
+    *) echo "Unknown flag: $arg"; exit 1 ;;
+  esac
+done
+
+get_current_version() {
+  grep -m1 '^;; Version:' "${EL_FILES[0]}" | sed 's/^;; Version:[[:space:]]*//'
+}
+
+get_last_tag() {
+  git describe --tags --abbrev=0 2>/dev/null || echo ""
+}
+
+# Returns: "minor", "patch", or "none"
+compute_bump() {
+  local since="$1"
+  local log_range
+  if [ -n "$since" ]; then
+    log_range="${since}..HEAD"
+  else
+    log_range="HEAD"
+  fi
+
+  local bump="none"
+  while IFS= read -r line; do
+    local hash subject
+    hash=$(echo "$line" | cut -d' ' -f1)
+    subject=$(echo "$line" | cut -d' ' -f2-)
+
+    # Check for ! before : (e.g., feat!: or feat(scope)!:)
+    if echo "$subject" | grep -qE '^[a-z]+(\([^)]*\))?!:'; then
+      bump="minor"
+      break
+    fi
+
+    # Check for BREAKING CHANGE in body
+    if git log -1 --format='%b' "$hash" | grep -q 'BREAKING CHANGE'; then
+      bump="minor"
+      break
+    fi
+
+    # Any conventional commit type triggers at least a patch
+    if echo "$subject" | grep -qE '^(feat|fix|refactor|perf|chore|docs|test|ci|build)(\([^)]*\))?!?:'; then
+      bump="patch"
+    fi
+  done < <(git log --oneline "$log_range" 2>/dev/null)
+
+  echo "$bump"
+}
+
+bump_version() {
+  local current="$1" bump_type="$2"
+  local major minor patch
+  IFS='.' read -r major minor patch <<< "$current"
+
+  case "$bump_type" in
+    minor) echo "${major}.$((minor + 1)).0" ;;
+    patch) echo "${major}.${minor}.$((patch + 1))" ;;
+    *) echo "$current" ;;
+  esac
+}
+
+# Classify a conventional commit subject line
+# Returns: breaking|added|fixed|changed|other|skip
+classify_commit() {
+  local subject="$1" hash="$2"
+
+  # Check for ! before colon
+  if echo "$subject" | grep -qE '^[a-z]+(\([^)]*\))?!:'; then
+    echo "breaking"
+    return
+  fi
+
+  # Check for BREAKING CHANGE in body
+  if [ -n "$hash" ] && git log -1 --format='%b' "$hash" | grep -q 'BREAKING CHANGE'; then
+    echo "breaking"
+    return
+  fi
+
+  local type
+  type=$(echo "$subject" | sed -E 's/^([a-z]+)(\([^)]*\))?!?:.*/\1/')
+
+  case "$type" in
+    feat) echo "added" ;;
+    fix) echo "fixed" ;;
+    refactor|perf) echo "changed" ;;
+    chore|docs|test|ci|build) echo "other" ;;
+    *) echo "skip" ;;
+  esac
+}
+
+# Strip the conventional commit prefix from a subject
+strip_prefix() {
+  echo "$1" | sed -E 's/^[a-z]+(\([^)]*\))?!?:[[:space:]]*//'
+}
+
+generate_changelog_section() {
+  local new_version="$1" since="$2"
+  local log_range
+  if [ -n "$since" ]; then
+    log_range="${since}..HEAD"
+  else
+    log_range="HEAD"
+  fi
+
+  local -a breaking=() added=() fixed=() changed=() other=()
+
+  while IFS= read -r line; do
+    local hash subject category stripped
+    hash=$(echo "$line" | cut -d' ' -f1)
+    subject=$(echo "$line" | cut -d' ' -f2-)
+    category=$(classify_commit "$subject" "$hash")
+    stripped=$(strip_prefix "$subject")
+
+    case "$category" in
+      breaking) breaking+=("$stripped") ;;
+      added) added+=("$stripped") ;;
+      fixed) fixed+=("$stripped") ;;
+      changed) changed+=("$stripped") ;;
+      other) other+=("$stripped") ;;
+    esac
+  done < <(git log --oneline "$log_range" 2>/dev/null)
+
+  local section=""
+  section+="* [${new_version}] - $(date +%Y-%m-%d)"
+
+  for label_var in "Breaking:breaking" "Added:added" "Fixed:fixed" "Changed:changed" "Other:other"; do
+    local label="${label_var%%:*}"
+    local var="${label_var##*:}"
+    local -n arr="$var"
+    if [ ${#arr[@]} -gt 0 ]; then
+      section+=$'\n'"** ${label}"
+      for entry in "${arr[@]}"; do
+        section+=$'\n'"- ${entry}"
+      done
+    fi
+  done
+
+  echo "$section"
+}
+
+update_changelog() {
+  local section="$1"
+  local changelog="$PROJECT/CHANGELOG.org"
+
+  if [ -f "$changelog" ]; then
+    local title_line
+    title_line=$(head -1 "$changelog")
+    local rest
+    rest=$(tail -n +2 "$changelog")
+    printf '%s\n\n%s\n%s\n' "$title_line" "$section" "$rest" > "$changelog"
+  else
+    printf '#+TITLE: Changelog\n\n%s\n' "$section" > "$changelog"
+  fi
+}
+
+# --- Preflight ---
+
+preflight() {
+  # Check gh binary exists (only needed for remote operations)
+  if ! "$LOCAL_ONLY" && ! "$DRY_RUN"; then
+    if ! command -v gh &>/dev/null; then
+      echo "Error: gh CLI not found. Install it or use --local-only" >&2
+      exit 1
+    fi
+    if [ -z "${GITHUB_TOKEN:-}" ] && ! gh auth status &>/dev/null; then
+      echo "Error: gh CLI not authenticated. Set GITHUB_TOKEN or run 'gh auth login'" >&2
+      exit 1
+    fi
+  fi
+
+  # Check clean working tree
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "Error: working tree is not clean. Commit or stash changes first." >&2
+    exit 1
+  fi
+
+  # Check branch
+  if ! "$NO_BRANCH_CHECK"; then
+    local branch
+    branch=$(git branch --show-current)
+    if [ "$branch" != "main" ]; then
+      echo "Error: must be on main branch (currently on '$branch'). Use --no-branch-check to override." >&2
+      exit 1
+    fi
+  fi
+}
+
+# --- Main ---
+
+preflight
+
+current_version=$(get_current_version)
+last_tag=$(get_last_tag)
+bump_type=$(compute_bump "$last_tag")
+
+if [ "$bump_type" = "none" ]; then
+  echo "Error: no releasable commits found since ${last_tag:-beginning}" >&2
+  exit 1
+fi
+
+new_version=$(bump_version "$current_version" "$bump_type")
+
+# Check tag collision
+if git tag -l "v${new_version}" | grep -q .; then
+  echo "Error: tag v${new_version} already exists" >&2
+  exit 1
+fi
+
+changelog_section=$(generate_changelog_section "$new_version" "$last_tag")
+
+if "$DRY_RUN"; then
+  echo "Would release: $current_version → $new_version"
+  echo "Bump type: $bump_type"
+  echo ""
+  echo "Changelog preview:"
+  echo "$changelog_section"
+  echo ""
+  echo "Files to update:"
+  for el_file in "${EL_FILES[@]}"; do
+    [ -f "$el_file" ] && echo "  $(basename "$el_file")"
+  done
+  echo "  CHANGELOG.org"
+  exit 0
+fi
+
+# Update .el file versions
+for el_file in "${EL_FILES[@]}"; do
+  if [ -f "$el_file" ]; then
+    sed "s/^;; Version: .*$/;; Version: ${new_version}/" "$el_file" > "$el_file.tmp" && mv "$el_file.tmp" "$el_file"
+  fi
+done
+
+update_changelog "$changelog_section"
+
+# --- Git operations ---
+
+git add "${EL_FILES[@]}" "$PROJECT/CHANGELOG.org"
+git commit -m "chore: release v${new_version}"
+git tag "v${new_version}"
+
+echo "Created commit and tag v${new_version}"
+
+if "$LOCAL_ONLY"; then
+  echo "Local-only mode: skipping push and GitHub release"
+  exit 0
+fi
+
+# --- Remote operations ---
+
+git push
+git push --tags
+echo "Pushed to remote"
+
+echo "$changelog_section" | gh release create "v${new_version}" \
+  --title "v${new_version}" \
+  --notes-file -
+
+echo "Created GitHub release v${new_version}"

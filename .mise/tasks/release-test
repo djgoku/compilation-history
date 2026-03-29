@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run release script tests"
+set -euo pipefail
+
+bash "${MISE_PROJECT_DIR:-.}/tests/test-release.sh"

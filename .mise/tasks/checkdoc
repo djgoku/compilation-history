@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#MISE description="Check docstring conventions with checkdoc"
+set -euo pipefail
+
+PROJECT="${MISE_PROJECT_DIR:-.}"
+
+# Find all source .el files (exclude test files)
+src_files=()
+for f in "$PROJECT"/compilation-history*.el; do
+  [ -f "$f" ] || continue
+  case "$(basename "$f")" in
+    test-*) continue ;;
+  esac
+  src_files+=("$f")
+done
+
+status=0
+
+for src in "${src_files[@]}"; do
+  echo "Running checkdoc on $(basename "$src")..."
+
+  emacs --batch \
+    -L "$PROJECT" \
+    --eval "
+(progn
+  (require 'checkdoc)
+  (with-current-buffer (find-file-noselect \"$src\")
+    (let ((checkdoc-diagnostic-buffer \"*checkdoc*\"))
+      (checkdoc-current-buffer t)
+      (with-current-buffer (get-buffer-create checkdoc-diagnostic-buffer)
+        (goto-char (point-min))
+        (when (re-search-forward \"^.+:[0-9]+:\" nil t)
+          (princ (buffer-string) #'external-debugging-output)
+          (kill-emacs 1)))
+      (princ \"OK: $(basename "$src")\n\" #'external-debugging-output)
+      (kill-emacs 0))))" 2>&1 || status=1
+done
+
+exit $status

@@ -1,0 +1,54 @@
+env:
+  MISE_YES: "1"
+
+check_task:
+  name: "Check (Emacs ${EMACS_VERSION})"
+  container:
+    dockerfile: .cirrus.Dockerfile
+    docker_arguments:
+      EMACS_VERSION: ${EMACS_VERSION}
+  matrix:
+    - env:
+        EMACS_VERSION: "29.4"
+    - env:
+        EMACS_VERSION: "30.1"
+    - env:
+        EMACS_VERSION: "master"
+  allow_failures: $EMACS_VERSION == 'master'
+  check_script:
+    - emacs --batch --eval "(message (with-temp-buffer (emacs-build-description) (buffer-string)))"
+    - mise run check
+
+release_dry_run_task:
+  name: "Release dry-run"
+  only_if: $CIRRUS_BRANCH != 'main'
+  container:
+    dockerfile: .cirrus.Dockerfile
+    docker_arguments:
+      EMACS_VERSION: "29.4"
+  clone_script: |
+    git clone --branch=$CIRRUS_BRANCH --tags \
+      https://x-access-token:${CIRRUS_REPO_CLONE_TOKEN}@github.com/${CIRRUS_REPO_FULL_NAME}.git \
+      $CIRRUS_WORKING_DIR
+  script:
+    - mise run release -- --dry-run --no-branch-check
+    - mise run release-test
+
+release_task:
+  name: "Release"
+  only_if: $CIRRUS_BRANCH == 'main'
+  depends_on: check
+  env:
+    GITHUB_TOKEN: ENCRYPTED[9a34e5f72c46dff6bba1345f2a70bd550ac2d9f0812b249e9e6e5ccf2562b7f73602a7d1efbd509c0dfb6602cd07c003]
+  container:
+    dockerfile: .cirrus.Dockerfile
+    docker_arguments:
+      EMACS_VERSION: "29.4"
+  clone_script: |
+    git clone --branch=$CIRRUS_BRANCH --tags \
+      https://x-access-token:${GITHUB_TOKEN}@github.com/${CIRRUS_REPO_FULL_NAME}.git \
+      $CIRRUS_WORKING_DIR
+  script:
+    - git config user.name "cirrus-ci[bot]"
+    - git config user.email "cirrus-ci[bot]@users.noreply.github.com"
+    - mise run release || echo "Nothing to release"

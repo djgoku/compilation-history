@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Install dependencies via Elpaca into .elpaca/"
+set -euo pipefail
+
+emacs --batch -Q -l "${MISE_PROJECT_DIR:-.}/scripts/elpaca-bootstrap.el"
