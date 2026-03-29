@@ -37,7 +37,9 @@ release_dry_run_task:
 release_task:
   name: "Release"
   only_if: $CIRRUS_BRANCH == 'main'
-  depends_on: check
+  depends_on:
+    - "Check (Emacs 29.4)"
+    - "Check (Emacs 30.1)"
   env:
     GITHUB_TOKEN: ENCRYPTED[9a34e5f72c46dff6bba1345f2a70bd550ac2d9f0812b249e9e6e5ccf2562b7f73602a7d1efbd509c0dfb6602cd07c003]
   container:

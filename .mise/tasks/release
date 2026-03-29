@@ -262,7 +262,7 @@ update_changelog "$changelog_section"
 # --- Git operations ---
 
 git add "${EL_FILES[@]}" "$PROJECT/CHANGELOG.org"
-git commit -m "chore: release v${new_version}"
+git commit -m "chore: release v${new_version} [skip ci]"
 git tag "v${new_version}"
 
 echo "Created commit and tag v${new_version}"
