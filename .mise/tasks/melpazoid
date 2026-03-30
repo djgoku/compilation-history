@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#MISE description="Run melpazoid MELPA compliance and style checks"
+set -euo pipefail
+
+PROJECT="${MISE_PROJECT_DIR:-.}"
+CACHE_DIR="$PROJECT/.lint-deps"
+PACKAGE_MAIN="compilation-history.el"
+
+# Pinned dependency versions
+declare -A DEPS=(
+  [melpazoid]="https://github.com/riscy/melpazoid.git|7bc2a1a"
+  [package-lint]="https://github.com/purcell/package-lint.git|1c37329"
+  [epl]="https://github.com/cask/epl.git|78ab7a8"
+  [pkg-info]="https://github.com/emacsorphanage/pkg-info.git|76ba741"
+)
+
+clone_pinned() {
+  local name="$1" url="$2" sha="$3"
+  local dir="$CACHE_DIR/$name"
+  if [ ! -d "$dir/.git" ]; then
+    git clone -q "$url" "$dir"
+    git -C "$dir" checkout "$sha" -q
+  elif [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$sha" ]; then
+    git -C "$dir" fetch -q origin
+    git -C "$dir" checkout "$sha" -q
+  fi
+}
+
+# Clone all dependencies
+for name in "${!DEPS[@]}"; do
+  IFS='|' read -r url sha <<< "${DEPS[$name]}"
+  clone_pinned "$name" "$url" "$sha"
+done
+
+# Build load paths
+LOAD_PATHS=(
+  -L "$CACHE_DIR/melpazoid/melpazoid"  # repo has nested melpazoid/ subdir
+  -L "$CACHE_DIR/package-lint"
+  -L "$CACHE_DIR/epl"
+  -L "$CACHE_DIR/pkg-info"
+)
+
+echo "Running melpazoid checks..."
+
+# melpazoid uses send-string-to-terminal in batch mode;
+# override it to use princ so output goes to stdout.
+# Set user-emacs-directory to a temp dir so melpazoid's
+# package-load-paths doesn't error on missing ~/.emacs.d/elpa.
+set +e
+output=$(cd "$PROJECT" && PACKAGE_MAIN="$PACKAGE_MAIN" emacs --batch \
+  -L "$PROJECT" \
+  "${LOAD_PATHS[@]}" \
+  --eval "(let ((d (concat temporary-file-directory \"melpazoid-emacs.d/\"))) (make-directory (concat d \"elpa\") t) (setq user-emacs-directory d))" \
+  --eval "(advice-add 'send-string-to-terminal :override (lambda (s &rest _) (princ s)))" \
+  -l melpazoid \
+  2>&1)
+exit_code=$?
+set -e
+
+echo "$output"
+
+# Match the same patterns as melpazoid.py:
+#   byte-compile-file writes ":Error: "
+#   package-lint writes ": error: "
+if echo "$output" | grep -qE ':Error: |: error: '; then
+  echo ""
+  echo "FAIL: melpazoid found errors"
+  exit 1
+fi
+
+if [ "$exit_code" -ne 0 ]; then
+  echo ""
+  echo "FAIL: emacs exited with code $exit_code"
+  exit 1
+fi
+
+echo ""
+echo "OK: melpazoid passed"

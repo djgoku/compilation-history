@@ -45,11 +45,10 @@
 (autoload 'compilation-history-view "compilation-history-view"
   "Open the compilation history view buffer." t)
 
-(defvar compilation-history-map (make-sparse-keymap)
-  "Keymap for compilation history commands.")
-
-(define-key compilation-history-map (kbd "c") 'compile)
-(define-key compilation-history-map (kbd "v") 'compilation-history-view)
+(defvar-keymap compilation-history-map
+  :doc "Keymap for compilation history commands."
+  "c" #'compile
+  "v" #'compilation-history-view)
 
 ;;; Customization
 
@@ -84,9 +83,6 @@ Set to nil to disable line-based saving."
   :group 'compilation-history)
 
 ;;; Buffer-local Variables
-
-(defvar compile-command)           ; built-in, silence byte-compiler
-(defvar compilation-directory)     ; built-in, silence byte-compiler
 
 (defvar-local compilation-history-record nil
   "The compilation-history record for this buffer.")
@@ -242,7 +238,7 @@ If START-TIME is non-nil, return it unchanged."
                       :git-branch (car (vc-git-branches))
                       :git-commit (vc-git-working-revision dir)
                       :git-commit-message (when (fboundp 'vc-git-get-change-comment)
-                                           (vc-git-get-change-comment dir "HEAD"))
+                                            (vc-git-get-change-comment dir "HEAD"))
                       :git-remote-urls (compilation-history--get-git-remote-urls)))
       info)))
 
@@ -274,7 +270,7 @@ that case and restores it to the value stored in the record."
              compilation-history-record)
     (let ((record-command (compilation-history-command compilation-history-record)))
       (unless (equal compile-command record-command)
-        (with-no-warnings (setq-local compile-command record-command))))))
+        (setq-local compile-command record-command)))))
 ;;; Database Functions
 
 (defvar compilation-history--db nil
@@ -547,7 +543,7 @@ Avoids marking a record as killed when it already exited successfully."
       (let* ((buffer (process-buffer proc)))
         (message "Killing compilation in buffer %s" (buffer-name buffer))
         (with-current-buffer buffer
-          (call-interactively 'kill-compilation)
+          (call-interactively #'kill-compilation)
           ;; Brief pause to let the process die; output may be incomplete
           ;; if it takes longer than 250ms, but there's no reliable way to
           ;; block during kill-emacs-hook.
@@ -593,7 +589,7 @@ Resets the countdown so line-triggered saves don't get a stale timer."
                                   (lambda ()
                                     (when (buffer-live-p buf)
                                       (with-current-buffer buf
-                                        (when (eq major-mode 'comint-mode)
+                                        (when (derived-mode-p 'comint-mode)
                                           (setq-local compilation-history--output-dirty t))
                                         (compilation-history--save-partial-output buf)))))))))
 
@@ -635,9 +631,8 @@ for line-threshold saves."
   "Set buffer-local compile-command to make standard recompile work."
   (unless (local-variable-p 'compile-command)
     (when (compilation-history-command compilation-history-record)
-      (with-no-warnings
-        (setq-local compile-command (compilation-history-command compilation-history-record))
-        (setq-local compilation-directory default-directory)))))
+      (setq-local compile-command (compilation-history-command compilation-history-record))
+      (setq-local compilation-directory default-directory))))
 
 ;;; Public API
 
