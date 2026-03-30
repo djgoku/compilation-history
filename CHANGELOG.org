@@ -1,5 +1,9 @@
 #+TITLE: Changelog
 
+* [0.2.4] - 2026-03-30
+** Fixed
+- restore compilation-arguments when recompile mutates it via setcar
+
 * [0.2.3] - 2026-03-30
 ** Added
 - convert GitHub release notes to markdown format
