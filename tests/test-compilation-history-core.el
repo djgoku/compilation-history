@@ -343,6 +343,65 @@ Buffer A's compile-command should still be 'echo original'."
         (setq compile-command orig-compile-command)
         (setq compilation-history-db-file orig-db-file)))))
 
+(ert-deftest test-recompile-with-prefix-preserves-compilation-arguments ()
+  "Regression: C-u g mutates compilation-arguments via setcar but
+compilation-history should restore it so the next plain g recompile
+uses the original command, not the edited one.
+Scenario: Buffer A runs 'echo original', user does C-u g with 'echo edited'.
+Buffer A's (car compilation-arguments) should still be 'echo original'."
+  (compilation-history-test-with-db
+    (let ((orig-db-file compilation-history-db-file)
+          (orig-compile-command compile-command)
+          (original-command "echo original")
+          (edited-command "echo edited"))
+      (unwind-protect
+          (progn
+            (compilation-history-init)
+            (compilation-history-mode 1)
+
+            ;; Run original compile command
+            (compile original-command)
+
+            ;; Wait for compilation to finish
+            (while compilation-in-progress
+              (sit-for 0.1))
+
+            ;; Find buffer A (the original compilation buffer)
+            (let ((buffer-a (seq-find (lambda (buf)
+                                        (string-prefix-p "*compilation-history-" (buffer-name buf)))
+                                      (buffer-list))))
+              (should buffer-a)
+
+              ;; Verify buffer A has correct compilation-arguments
+              (with-current-buffer buffer-a
+                (should (equal original-command (car compilation-arguments)))
+                (message "Buffer A compilation-arguments before C-u g: %s" compilation-arguments)
+
+                ;; Simulate C-u g: recompile with edited command
+                (cl-letf (((symbol-function 'compilation-read-command)
+                           (lambda (_) edited-command)))
+                  (recompile t)))
+
+              ;; Wait for new compilation to finish
+              (while compilation-in-progress
+                (sit-for 0.1))
+
+              ;; BUG: recompile's setcar mutated compilation-arguments in buffer A
+              ;; so (car compilation-arguments) is now "echo edited" instead of "echo original"
+              (with-current-buffer buffer-a
+                (message "Buffer A compilation-arguments after C-u g: %s" compilation-arguments)
+                (should (equal original-command (car compilation-arguments))))
+
+              ;; Cleanup all compilation-history buffers
+              (dolist (buf (buffer-list))
+                (when (string-prefix-p "*compilation-history-" (buffer-name buf))
+                  (kill-buffer buf)))))
+
+        ;; Cleanup
+        (compilation-history-mode -1)
+        (setq compile-command orig-compile-command)
+        (setq compilation-history-db-file orig-db-file)))))
+
 (ert-deftest test-compile-from-compilation-buffer-preserves-original-compile-command ()
   "Test that M-x compile from within a compilation buffer does not overwrite
 compile-command in the original buffer.

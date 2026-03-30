@@ -260,17 +260,23 @@ _MODE is required by `compilation-buffer-name-function' but unused."
   (format "*compilation-history-%s*" (compilation-history--get-timestamp)))
 
 (defun compilation-history--maybe-fix-buffer-compile-command ()
-  "Restore buffer-local `compile-command' to match the compilation record.
-When compiling from an existing compilation-history buffer, Emacs may
-overwrite the buffer-local `compile-command'.  This function detects
-that case and restores it to the value stored in the record."
+  "Restore buffer-local `compile-command' and `compilation-arguments'.
+Match them to the compilation record.  When compiling from an existing
+compilation-history buffer, Emacs may overwrite the buffer-local
+`compile-command'.  Additionally, `recompile' with a prefix argument
+destructively mutates `compilation-arguments' via `setcar'.  This
+function detects both cases and restores them."
   (when (and (local-variable-p 'compile-command)
              (string-prefix-p "*compilation-history-" (buffer-name))
              (boundp 'compilation-history-record)
              compilation-history-record)
     (let ((record-command (compilation-history-command compilation-history-record)))
       (unless (equal compile-command record-command)
-        (setq-local compile-command record-command)))))
+        (setq-local compile-command record-command))
+      (when (and (local-variable-p 'compilation-arguments)
+                 compilation-arguments
+                 (not (equal (car compilation-arguments) record-command)))
+        (setcar compilation-arguments record-command)))))
 ;;; Database Functions
 
 (defvar compilation-history--db nil
