@@ -1,5 +1,13 @@
 #+TITLE: Changelog
 
+* [0.2.5] - 2026-04-01
+** Added
+- switch to new compilation buffer on recompile
+- add recompile switch buffer defcustom and advice function
+** Other
+- document recompile switch behavior and add view display TODO
+- add failing tests for recompile switch buffer behavior
+
 * [0.2.4] - 2026-03-30
 ** Fixed
 - restore compilation-arguments when recompile mutates it via setcar

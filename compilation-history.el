@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025 Jonathan Carroll Otsuka
 
 ;; Author: Jonathan Carroll Otsuka <pitas.axioms0c@icloud.com>
-;; Version: 0.2.4
+;; Version: 0.2.5
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: processes, tools
 ;; URL: https://github.com/djgoku/compilation-history
