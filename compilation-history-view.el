@@ -3,7 +3,7 @@
 ;; Copyright (C) 2025 Jonathan Carroll Otsuka
 
 ;; Author: Jonathan Carroll Otsuka <pitas.axioms0c@icloud.com>
-;; Version: 0.2.5
+;; Version: 0.2.6
 ;; Keywords: processes, tools
 ;; URL: https://github.com/djgoku/compilation-history
 

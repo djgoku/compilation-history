@@ -1,5 +1,9 @@
 #+TITLE: Changelog
 
+* [0.2.6] - 2026-04-01
+** Added
+- open compilation history view in full frame
+
 * [0.2.5] - 2026-04-01
 ** Added
 - switch to new compilation buffer on recompile
