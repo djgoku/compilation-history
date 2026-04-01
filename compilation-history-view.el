@@ -115,6 +115,9 @@ so column order does not affect data access."
 (defvar-local compilation-history-view--opened-buffers nil
   "List of compilation buffers opened from this view.")
 
+(defvar-local compilation-history-view--prev-window-config nil
+  "Window configuration saved before opening the view in full frame.")
+
 ;;; Default Formatters
 
 (defun compilation-history-view--format-commit (value)
@@ -399,13 +402,15 @@ When DISABLED is non-nil, button is dimmed and non-interactive."
   "Open the compilation history view buffer."
   (interactive)
   (compilation-history--ensure-db)
-  (let ((buf (get-buffer-create "*Compilation History*")))
-    (pop-to-buffer buf '((display-buffer-reuse-window display-buffer-same-window)))
+  (let ((buf (get-buffer-create "*Compilation History*"))
+        (prev-config (current-window-configuration)))
+    (pop-to-buffer buf '((display-buffer-reuse-window display-buffer-full-frame)))
     (unless (derived-mode-p 'compilation-history-view-mode)
       (compilation-history-view-mode)
       (setq compilation-history-view--pagination
             (make-compilation-history-view-pagination
              :page-size (compilation-history-view--calculate-page-size))))
+    (setq compilation-history-view--prev-window-config prev-config)
     (compilation-history-view--render)
     buf))
 
@@ -607,7 +612,10 @@ then buries the view itself.  Clears preview mode."
         (when win (delete-window win)))
       (bury-buffer buf)))
   (setq compilation-history-view--opened-buffers nil)
-  (quit-window))
+  (let ((config compilation-history-view--prev-window-config))
+    (if (and config (one-window-p))
+        (set-window-configuration config)
+      (quit-window))))
 
 (defun compilation-history-view-kill-all ()
   "Kill all compilation-history buffers and the view itself."

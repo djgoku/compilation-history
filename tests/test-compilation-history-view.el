@@ -689,5 +689,59 @@
           (kill-buffer buf)
           (delete-directory test-dir t))))))
 
+;;; Full-frame view tests
+
+(ert-deftest test-compilation-history-view-saves-window-config ()
+  "Opening view saves the previous window configuration."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (when-let* ((old (get-buffer "*Compilation History*")))
+      (kill-buffer old))
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (should compilation-history-view--prev-window-config))
+        (kill-buffer buf)))))
+
+(ert-deftest test-compilation-history-view-quit-restores-in-full-frame ()
+  "Quitting view in full frame calls set-window-configuration."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (when-let* ((old (get-buffer "*Compilation History*")))
+      (kill-buffer old))
+    (let ((buf (compilation-history-view))
+          (restored nil))
+      (unwind-protect
+          (with-current-buffer buf
+            (let ((saved-config compilation-history-view--prev-window-config))
+              (cl-letf (((symbol-function 'one-window-p)
+                         (lambda (&rest _) t))
+                        ((symbol-function 'set-window-configuration)
+                         (lambda (config) (setq restored config))))
+                (compilation-history-view-quit))
+              (should restored)
+              (should (eq restored saved-config))))
+        (when (buffer-live-p buf)
+          (kill-buffer buf))))))
+
+(ert-deftest test-compilation-history-view-quit-no-restore-when-user-split ()
+  "Quitting view does not restore config if user has split."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (when-let* ((old (get-buffer "*Compilation History*")))
+      (kill-buffer old))
+    (let ((buf (compilation-history-view))
+          (restored nil))
+      (unwind-protect
+          (with-current-buffer buf
+            (cl-letf (((symbol-function 'one-window-p)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'set-window-configuration)
+                       (lambda (config) (setq restored config))))
+              (compilation-history-view-quit))
+            (should-not restored))
+        (when (buffer-live-p buf)
+          (kill-buffer buf))))))
+
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here

@@ -335,7 +335,3 @@ Full-text search is supported via FTS5 on command, directory, branch, and output
 |------------------------------+----------------------------------------|
 | =compilation-history.el=     | Core tracking, hooks, and lifecycle    |
 | =compilation-history-view.el= | Searchable vtable-based history browser |
-
-* TODO
-
-- [ ] Allow configuring how =compilation-history-view= opens — e.g., full frame, dedicated frame, or current window layout
