@@ -867,5 +867,106 @@ compile-command in the original buffer via setcar on compilation-arguments."
         (should (string-match-p "\033\\[32m" output))
         (should (string-match-p "\033\\[31m" output))))))
 
+;;; Recompile switch buffer tests
+
+(ert-deftest test-recompile-switch-default-switches-buffer ()
+  "Recompile from a compilation-history buffer selects the new buffer's window by default."
+  (let ((old-buf (generate-new-buffer "*compilation-history-20260331T000000*"))
+        (new-buf (generate-new-buffer "*compilation-history-20260331T000001*"))
+        (selected-win nil))
+    (unwind-protect
+        (with-current-buffer old-buf
+          ;; Display new-buf in a window so get-buffer-window finds it
+          (display-buffer new-buf)
+          (let ((compilation-history-recompile-switch-behavior 'switch))
+            (cl-letf (((symbol-function 'recompile)
+                       (lambda (&rest _) new-buf))
+                      ((symbol-function 'select-window)
+                       (lambda (win) (setq selected-win win))))
+              (compilation-history--switch-to-recompile-buffer #'recompile))
+            (should (eq selected-win (get-buffer-window new-buf)))))
+      (kill-buffer old-buf)
+      (kill-buffer new-buf))))
+
+(ert-deftest test-recompile-switch-pop-uses-pop-to-buffer ()
+  "With `pop' setting, recompile uses `pop-to-buffer' instead of `switch-to-buffer'."
+  (let ((old-buf (generate-new-buffer "*compilation-history-20260331T000000*"))
+        (new-buf (generate-new-buffer "*compilation-history-20260331T000001*"))
+        (popped-to nil))
+    (unwind-protect
+        (with-current-buffer old-buf
+          (let ((compilation-history-recompile-switch-behavior 'pop))
+            (cl-letf (((symbol-function 'recompile)
+                       (lambda (&rest _) new-buf))
+                      ((symbol-function 'pop-to-buffer)
+                       (lambda (buf) (setq popped-to buf))))
+              (compilation-history--switch-to-recompile-buffer #'recompile))
+            (should (eq popped-to new-buf))))
+      (kill-buffer old-buf)
+      (kill-buffer new-buf))))
+
+(ert-deftest test-recompile-switch-nil-stays-in-current-buffer ()
+  "With nil setting, recompile does not switch buffers."
+  (let ((old-buf (generate-new-buffer "*compilation-history-20260331T000000*"))
+        (new-buf (generate-new-buffer "*compilation-history-20260331T000001*"))
+        (selected-win nil))
+    (unwind-protect
+        (with-current-buffer old-buf
+          (display-buffer new-buf)
+          (let ((compilation-history-recompile-switch-behavior nil))
+            (cl-letf (((symbol-function 'recompile)
+                       (lambda (&rest _) new-buf))
+                      ((symbol-function 'select-window)
+                       (lambda (win) (setq selected-win win))))
+              (compilation-history--switch-to-recompile-buffer #'recompile))
+            (should-not selected-win)))
+      (kill-buffer old-buf)
+      (kill-buffer new-buf))))
+
+(ert-deftest test-recompile-switch-non-history-buffer-does-not-switch ()
+  "Recompile from a non-compilation-history buffer does not switch regardless of setting."
+  (let ((old-buf (generate-new-buffer "*some-other-buffer*"))
+        (new-buf (generate-new-buffer "*compilation-history-20260331T000001*"))
+        (selected-win nil))
+    (unwind-protect
+        (with-current-buffer old-buf
+          (display-buffer new-buf)
+          (let ((compilation-history-recompile-switch-behavior 'switch))
+            (cl-letf (((symbol-function 'recompile)
+                       (lambda (&rest _) new-buf))
+                      ((symbol-function 'select-window)
+                       (lambda (win) (setq selected-win win))))
+              (compilation-history--switch-to-recompile-buffer #'recompile))
+            (should-not selected-win)))
+      (kill-buffer old-buf)
+      (kill-buffer new-buf))))
+
+(ert-deftest test-recompile-switch-advice-lifecycle ()
+  "Advice is added when mode is enabled and removed when disabled."
+  (let ((orig-compile-command compile-command))
+    (unwind-protect
+        (progn
+          (compilation-history-mode 1)
+          (should (advice-member-p #'compilation-history--switch-to-recompile-buffer 'recompile))
+          (compilation-history-mode -1)
+          (should-not (advice-member-p #'compilation-history--switch-to-recompile-buffer 'recompile)))
+      (compilation-history-mode -1)
+      (setq compile-command orig-compile-command))))
+
+(ert-deftest test-recompile-switch-nil-return-no-error ()
+  "No error when recompile returns nil (e.g., error or cancellation)."
+  (let ((old-buf (generate-new-buffer "*compilation-history-20260331T000000*"))
+        (selected-win nil))
+    (unwind-protect
+        (with-current-buffer old-buf
+          (let ((compilation-history-recompile-switch-behavior 'switch))
+            (cl-letf (((symbol-function 'recompile)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'select-window)
+                       (lambda (win) (setq selected-win win))))
+              (compilation-history--switch-to-recompile-buffer #'recompile))
+            (should-not selected-win)))
+      (kill-buffer old-buf))))
+
 (provide 'test-compilation-history-core)
 ;;; test-compilation-history-core.el ends here

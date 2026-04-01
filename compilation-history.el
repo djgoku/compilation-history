@@ -82,6 +82,17 @@ Set to nil to disable line-based saving."
                  (const :tag "Disabled" nil))
   :group 'compilation-history)
 
+(defcustom compilation-history-recompile-switch-behavior 'switch
+  "How to display the new buffer after recompiling.
+Only applies when recompiling from a compilation-history buffer.
+If `switch', select the window showing the new compilation buffer.
+If `pop', use `pop-to-buffer' to respect `display-buffer-alist'.
+If nil, do not switch (standard Emacs recompile behavior)."
+  :type '(choice (const :tag "Switch to buffer" switch)
+                 (const :tag "Pop to buffer" pop)
+                 (const :tag "Disabled" nil))
+  :group 'compilation-history)
+
 ;;; Buffer-local Variables
 
 (defvar-local compilation-history-record nil
@@ -640,6 +651,22 @@ for line-threshold saves."
       (setq-local compile-command (compilation-history-command compilation-history-record))
       (setq-local compilation-directory default-directory))))
 
+(defun compilation-history--switch-to-recompile-buffer (orig-fun &rest args)
+  "Advice around ORIG-FUN to switch to the new compilation buffer.
+ARGS are passed through.  Only acts when called from a
+`*compilation-history-*' buffer and
+`compilation-history-recompile-switch-behavior' is non-nil."
+  (let ((from-history-buffer (string-prefix-p "*compilation-history-" (buffer-name))))
+    (let ((new-buf (apply orig-fun args)))
+      (when (and from-history-buffer
+                 compilation-history-recompile-switch-behavior
+                 (buffer-live-p new-buf))
+        (pcase compilation-history-recompile-switch-behavior
+          ('switch (when-let* ((win (get-buffer-window new-buf)))
+                    (select-window win)))
+          ('pop (pop-to-buffer new-buf))))
+      new-buf)))
+
 ;;; Public API
 
 (defun compilation-history-init ()
@@ -678,10 +705,12 @@ for line-threshold saves."
         (setq compilation-process-setup-function
               #'compilation-history--setup-function)
         (advice-add 'compilation-sentinel :before #'compilation-history--add-sentinel-metadata-advice)
+        (advice-add 'recompile :around #'compilation-history--switch-to-recompile-buffer)
         (add-hook 'kill-emacs-hook #'compilation-history--maybe-save-history))
     (setq compilation-buffer-name-function nil)
     (setq compilation-process-setup-function nil)
     (advice-remove 'compilation-sentinel #'compilation-history--add-sentinel-metadata-advice)
+    (advice-remove 'recompile #'compilation-history--switch-to-recompile-buffer)
     (remove-hook 'kill-emacs-hook #'compilation-history--maybe-save-history)
     ;; Cancel save timers in all active compilation-history buffers
     (dolist (buf (buffer-list))

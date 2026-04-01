@@ -165,6 +165,16 @@ Number of new output lines that trigger an immediate save to the database, witho
 
 Setting both =compilation-history-save-interval= and =compilation-history-save-line-threshold= to =nil= disables incremental saving entirely.
 
+** =compilation-history-recompile-switch-behavior=
+
+Controls whether recompiling from a compilation-history buffer automatically switches to the new compilation buffer.
+
+#+begin_src elisp
+;; Default: 'switch (select the window showing the new buffer)
+;; Options: 'switch, 'pop (respect display-buffer-alist), nil (disabled)
+(setq compilation-history-recompile-switch-behavior 'switch)
+#+end_src
+
 ** =compilation-history-view-split-direction=
 
 How to split the window when opening or previewing a compilation from the history view.
@@ -325,3 +335,7 @@ Full-text search is supported via FTS5 on command, directory, branch, and output
 |------------------------------+----------------------------------------|
 | =compilation-history.el=     | Core tracking, hooks, and lifecycle    |
 | =compilation-history-view.el= | Searchable vtable-based history browser |
+
+* TODO
+
+- [ ] Allow configuring how =compilation-history-view= opens — e.g., full frame, dedicated frame, or current window layout
