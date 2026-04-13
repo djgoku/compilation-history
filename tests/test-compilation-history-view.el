@@ -743,5 +743,38 @@
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
+(ert-deftest test-reopened-comint-buffer-has-output-and-flag ()
+  "Reopening a comint history item shows output and sets comint flag in compilation-arguments."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((record (compilation-history-test--make-record
+                   :record-id "20260413T120000000001"
+                   :command "ls -la"
+                   :compile-directory "/tmp/"
+                   :comint t)))
+      (compilation-history--insert-compilation-record record)
+      (compilation-history--update-compilation-record
+       "20260413T120000000001" 0
+       "Comint started\ntotal 42\ndrwxr-xr-x  10 user staff\nComint finished\n"))
+    (let* ((view-record (list :id "20260413T120000000001"
+                              :buffer-name "*compilation-history-test-comint-reopen*"
+                              :command "ls -la"
+                              :directory "/tmp/"
+                              :comint 1))
+           (buf (compilation-history-view--get-or-create-compilation-buffer view-record)))
+      (unwind-protect
+          (with-current-buffer buf
+            ;; Output should be present
+            (should (string-match-p "total 42"
+                                    (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "drwxr-xr-x"
+                                    (buffer-substring-no-properties (point-min) (point-max))))
+            ;; compilation-arguments comint flag should be t for recompile
+            (should (listp compilation-arguments))
+            (should (nth 1 compilation-arguments))
+            ;; compilation-history-record should have comint set
+            (should (compilation-history-comint compilation-history-record)))
+        (kill-buffer buf)))))
+
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here

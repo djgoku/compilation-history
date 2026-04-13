@@ -968,5 +968,99 @@ compile-command in the original buffer via setcar on compilation-arguments."
             (should-not selected-win)))
       (kill-buffer old-buf))))
 
+(ert-deftest test-comint-output-captured-to-database ()
+  "Test that comint-mode output is captured via preoutput filter and saved to DB."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (let ((buffer (generate-new-buffer "*test-comint-capture*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (comint-mode)
+            (setq-local compilation-history-record
+                        (compilation-history-test--make-record :comint t))
+            (compilation-history--insert-compilation-record compilation-history-record)
+            ;; Set up incremental save (this should add comint hook, not compilation-filter-hook)
+            (compilation-history--setup-incremental-save)
+            ;; Simulate process output via the preoutput filter
+            (compilation-history--comint-capture-raw-output "total 42\n")
+            (compilation-history--comint-capture-raw-output "drwxr-xr-x  10 user staff 320 Apr 13 12:00 .\n")
+            ;; Mark dirty and save
+            (setq-local compilation-history--output-dirty t)
+            (compilation-history--save-partial-output buffer)
+            ;; Verify DB has header + actual output, not just header
+            (let* ((db (sqlite-open temp-db))
+                   (rows (sqlite-select db "SELECT output FROM compilations WHERE id = ?"
+                                        (vector (compilation-history-record-id compilation-history-record)))))
+              (should rows)
+              (should (string-match-p "total 42" (caar rows)))
+              (should (string-match-p "drwxr-xr-x" (caar rows)))
+              (sqlite-close db)))
+        (kill-buffer buffer)))))
+
+(ert-deftest test-comint-hook-removed-after-finish ()
+  "Test that comint preoutput filter is removed after compilation finishes."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (let ((buffer (generate-new-buffer "*test-comint-hook-cleanup*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (comint-mode)
+            (setq-local compilation-history-record
+                        (compilation-history-test--make-record :comint t))
+            (compilation-history--insert-compilation-record compilation-history-record)
+            (compilation-history--setup-incremental-save)
+            ;; Hook should be present
+            (should (memq #'compilation-history--comint-capture-raw-output
+                          comint-preoutput-filter-functions))
+            ;; Simulate output and finish
+            (compilation-history--comint-capture-raw-output "output\n")
+            (insert "output\n\nComint finished\n")
+            (setf (compilation-history-exit-code compilation-history-record) 0)
+            (compilation-history--finish-function buffer "finished\n")
+            ;; Hook should be removed
+            (should-not (memq #'compilation-history--comint-capture-raw-output
+                              comint-preoutput-filter-functions)))
+        (kill-buffer buffer)))))
+
+(ert-deftest test-comint-setup-does-not-add-compilation-filter-hook ()
+  "Test that comint-mode buffers do not get --capture-raw-output on compilation-filter-hook."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (let ((buffer (generate-new-buffer "*test-comint-no-comp-hook*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (comint-mode)
+            (setq-local compilation-history-record
+                        (compilation-history-test--make-record :comint t))
+            (compilation-history--insert-compilation-record compilation-history-record)
+            (compilation-history--setup-incremental-save)
+            ;; Should have comint hook
+            (should (memq #'compilation-history--comint-capture-raw-output
+                          comint-preoutput-filter-functions))
+            ;; Should NOT have compilation-filter-hook capture
+            (should-not (memq #'compilation-history--capture-raw-output
+                              compilation-filter-hook)))
+        (kill-buffer buffer)))))
+
+(ert-deftest test-compilation-setup-does-not-add-comint-hook ()
+  "Test that compilation-mode buffers do not get comint preoutput hook."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (let ((buffer (generate-new-buffer "*test-comp-no-comint-hook*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (setq-local compilation-history-record
+                        (compilation-history-test--make-record))
+            (compilation-history--insert-compilation-record compilation-history-record)
+            (compilation-history--setup-incremental-save)
+            ;; Should have compilation-filter-hook capture
+            (should (memq #'compilation-history--capture-raw-output
+                          compilation-filter-hook))
+            ;; Should NOT have comint hook
+            (should-not (and (boundp 'comint-preoutput-filter-functions)
+                             (memq #'compilation-history--comint-capture-raw-output
+                                   comint-preoutput-filter-functions))))
+        (kill-buffer buffer)))))
+
 (provide 'test-compilation-history-core)
 ;;; test-compilation-history-core.el ends here
