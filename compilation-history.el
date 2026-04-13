@@ -517,6 +517,8 @@ Adds recompile and quit bindings and sets the buffer read-only."
       (compilation-history--cancel-save-timer)
       (remove-hook 'compilation-filter-hook #'compilation-history--track-output t)
       (remove-hook 'compilation-filter-hook #'compilation-history--capture-raw-output t)
+      (remove-hook 'comint-preoutput-filter-functions
+                   #'compilation-history--comint-capture-raw-output t)
       (let* ((footer (buffer-substring-no-properties
                       (save-excursion
                         (goto-char (point-max))
@@ -537,6 +539,8 @@ Adds recompile and quit bindings and sets the buffer read-only."
   "Handle compilation buffer kill when exit-code is nil.
 Avoids marking a record as killed when it already exited successfully."
   (compilation-history--cancel-save-timer)
+  (remove-hook 'comint-preoutput-filter-functions
+               #'compilation-history--comint-capture-raw-output t)
   (when (and (boundp 'compilation-history-record) compilation-history-record)
     (unless (compilation-history-exit-code compilation-history-record)
       (when-let* ((record-id (compilation-history-record-id compilation-history-record)))

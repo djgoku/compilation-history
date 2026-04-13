@@ -997,5 +997,30 @@ compile-command in the original buffer via setcar on compilation-arguments."
               (sqlite-close db)))
         (kill-buffer buffer)))))
 
+(ert-deftest test-comint-hook-removed-after-finish ()
+  "Test that comint preoutput filter is removed after compilation finishes."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (let ((buffer (generate-new-buffer "*test-comint-hook-cleanup*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (comint-mode)
+            (setq-local compilation-history-record
+                        (compilation-history-test--make-record :comint t))
+            (compilation-history--insert-compilation-record compilation-history-record)
+            (compilation-history--setup-incremental-save)
+            ;; Hook should be present
+            (should (memq #'compilation-history--comint-capture-raw-output
+                          comint-preoutput-filter-functions))
+            ;; Simulate output and finish
+            (compilation-history--comint-capture-raw-output "output\n")
+            (insert "output\n\nComint finished\n")
+            (setf (compilation-history-exit-code compilation-history-record) 0)
+            (compilation-history--finish-function buffer "finished\n")
+            ;; Hook should be removed
+            (should-not (memq #'compilation-history--comint-capture-raw-output
+                              comint-preoutput-filter-functions)))
+        (kill-buffer buffer)))))
+
 (provide 'test-compilation-history-core)
 ;;; test-compilation-history-core.el ends here
