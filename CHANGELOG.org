@@ -1,5 +1,13 @@
 #+TITLE: Changelog
 
+* [0.2.7] - 2026-04-13
+** Fixed
+- clean up comint preoutput hook on finish and buffer kill
+- capture comint-mode output via comint-preoutput-filter-functions
+** Other
+- add regression test for reopening comint history items
+- add negative tests for comint/compilation hook isolation
+
 * [0.2.6] - 2026-04-01
 ** Added
 - open compilation history view in full frame
