@@ -968,5 +968,34 @@ compile-command in the original buffer via setcar on compilation-arguments."
             (should-not selected-win)))
       (kill-buffer old-buf))))
 
+(ert-deftest test-comint-output-captured-to-database ()
+  "Test that comint-mode output is captured via preoutput filter and saved to DB."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (let ((buffer (generate-new-buffer "*test-comint-capture*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (comint-mode)
+            (setq-local compilation-history-record
+                        (compilation-history-test--make-record :comint t))
+            (compilation-history--insert-compilation-record compilation-history-record)
+            ;; Set up incremental save (this should add comint hook, not compilation-filter-hook)
+            (compilation-history--setup-incremental-save)
+            ;; Simulate process output via the preoutput filter
+            (compilation-history--comint-capture-raw-output "total 42\n")
+            (compilation-history--comint-capture-raw-output "drwxr-xr-x  10 user staff 320 Apr 13 12:00 .\n")
+            ;; Mark dirty and save
+            (setq-local compilation-history--output-dirty t)
+            (compilation-history--save-partial-output buffer)
+            ;; Verify DB has header + actual output, not just header
+            (let* ((db (sqlite-open temp-db))
+                   (rows (sqlite-select db "SELECT output FROM compilations WHERE id = ?"
+                                        (vector (compilation-history-record-id compilation-history-record)))))
+              (should rows)
+              (should (string-match-p "total 42" (caar rows)))
+              (should (string-match-p "drwxr-xr-x" (caar rows)))
+              (sqlite-close db)))
+        (kill-buffer buffer)))))
+
 (provide 'test-compilation-history-core)
 ;;; test-compilation-history-core.el ends here

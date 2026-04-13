@@ -618,6 +618,13 @@ Runs on `compilation-filter-hook' at depth -90, before
         (concat compilation-history--raw-output
                 (buffer-substring-no-properties compilation-filter-start (point)))))
 
+(defun compilation-history--comint-capture-raw-output (string)
+  "Capture raw comint output before ANSI filtering.
+Intended for `comint-preoutput-filter-functions'."
+  (setq compilation-history--raw-output
+        (concat compilation-history--raw-output string))
+  string)
+
 (defun compilation-history--track-output ()
   "Track new output lines and trigger save if threshold reached.
 Intended for use in `compilation-filter-hook'."
@@ -637,7 +644,10 @@ for line-threshold saves."
   (setq-local compilation-history--output-dirty nil)
   (setq-local compilation-history--raw-output "")
   (setq-local compilation-history--header (buffer-substring-no-properties (point-min) (point-max)))
-  (add-hook 'compilation-filter-hook #'compilation-history--capture-raw-output -90 t)
+  (if (derived-mode-p 'comint-mode)
+      (add-hook 'comint-preoutput-filter-functions
+                #'compilation-history--comint-capture-raw-output nil t)
+    (add-hook 'compilation-filter-hook #'compilation-history--capture-raw-output -90 t))
   (compilation-history--restart-save-timer)
   (when compilation-history-save-line-threshold
     (add-hook 'compilation-filter-hook #'compilation-history--track-output nil t)))
