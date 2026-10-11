@@ -38,6 +38,18 @@ To disable:
 (compilation-history-mode -1)
 #+end_src
 
+** Query Log
+
+To see the SQL that the history view runs as you search and page, run =M-x compilation-history-query-log-mode=. The =*compilation-history queries*= buffer opens and shows each query with its row count and elapsed time. A COUNT query shows its result instead of a row count:
+
+#+begin_example
+-- 19:32:00  count 3  0.2 ms
+SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)
+-- params: ["make"]
+#+end_example
+
+Run the command again to stop logging.
+
 * Recommended Setup
 
 A complete compilation stack using =use-package=. These three blocks work together but are independent — adopt all three or pick what you need.
