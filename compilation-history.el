@@ -288,6 +288,66 @@ function detects both cases and restores them."
                  compilation-arguments
                  (not (equal (car compilation-arguments) record-command)))
         (setcar compilation-arguments record-command)))))
+
+;;; Query Log
+
+(defconst compilation-history--query-log-buffer-name "*compilation-history queries*"
+  "Name of the buffer that `compilation-history-query-log-mode' writes to.
+The space after \"history\" keeps `compilation-history-view-kill-all',
+which kills every \"*compilation-history-\" buffer, from killing the log.")
+
+(define-minor-mode compilation-history-query-log-mode
+  "Log each SQL query compilation-history runs, with its result size.
+Each entry in the *compilation-history queries* buffer shows the time,
+the row count (or the result of a COUNT query), the elapsed time, the
+SQL, and its parameters.  Enabling the mode interactively displays
+that buffer."
+  :global t
+  :group 'compilation-history
+  (when (and compilation-history-query-log-mode
+             (called-interactively-p 'any))
+    (display-buffer (compilation-history--query-log-buffer))))
+
+(defun compilation-history--query-log-buffer ()
+  "Return the query log buffer, creating it if needed."
+  (or (get-buffer compilation-history--query-log-buffer-name)
+      (with-current-buffer (get-buffer-create compilation-history--query-log-buffer-name)
+        (special-mode)
+        (current-buffer))))
+
+(defun compilation-history--query-log-summary (rows)
+  "Describe the size of ROWS without their contents.
+One row holding one integer is a COUNT result, so show the count."
+  (pcase rows
+    (`((,(and (pred integerp) count))) (format "count %d" count))
+    (`(,_) "1 row")
+    (_ (format "%d rows" (length rows)))))
+
+(defun compilation-history--log-query (sql params rows elapsed)
+  "Append SQL, PARAMS, the size of ROWS, and ELAPSED seconds to the query log.
+Windows showing the end of the log keep showing its end."
+  (with-current-buffer (compilation-history--query-log-buffer)
+    (let* ((inhibit-read-only t)
+           (end (point-max))
+           (at-end (= (point) end))
+           (following (cl-remove-if-not
+                       (lambda (window) (= (window-point window) end))
+                       (get-buffer-window-list nil nil t))))
+      (save-excursion
+        (goto-char end)
+        (insert (format "-- %s  %s  %.1f ms\n%s\n"
+                        (format-time-string "%H:%M:%S")
+                        (compilation-history--query-log-summary rows)
+                        (* 1000 elapsed)
+                        sql))
+        (when params
+          (insert (format "-- params: %S\n" params)))
+        (insert "\n"))
+      (when at-end
+        (goto-char (point-max)))
+      (dolist (window following)
+        (set-window-point window (point-max))))))
+
 ;;; Database Functions
 
 (defvar compilation-history--db nil
@@ -311,6 +371,15 @@ without referencing the handle directly."
            (unwind-protect
                (progn ,@body)
              (sqlite-close ,db-sym)))))))
+
+(defun compilation-history--select (db sql &optional params)
+  "Run the SELECT statement SQL with PARAMS on DB and return its rows.
+When `compilation-history-query-log-mode' is on, also log the query."
+  (let* ((start (float-time))
+         (rows (sqlite-select db sql params)))
+    (when compilation-history-query-log-mode
+      (compilation-history--log-query sql params rows (- (float-time) start)))
+    rows))
 
 (defun compilation-history--extract-id-from-buffer-name (buffer-name)
   "Extract the timestamp ID from BUFFER-NAME."
@@ -396,7 +465,7 @@ Optional KILLED flag marks the compilation as killed."
 (defun compilation-history--count-records ()
   "Return the total number of compilation records."
   (compilation-history--with-db db
-    (caar (sqlite-select db "SELECT COUNT(*) FROM compilations"))))
+    (caar (compilation-history--select db "SELECT COUNT(*) FROM compilations"))))
 
 (defconst compilation-history--page-columns
   "id, buffer_name, compile_command, default_directory, datetime(start_time, COALESCE(utc_offset, 0) || ' minutes') AS start_time, end_time, exit_code, killed, git_branch, git_commit, comint"
@@ -410,18 +479,18 @@ Optional KILLED flag marks the compilation as killed."
   "Return LIMIT compilation records starting at OFFSET, newest first.
 Each row includes a computed duration_seconds column appended at the end."
   (compilation-history--with-db db
-    (sqlite-select db
-                   (format "SELECT %s, %s FROM compilations ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                           compilation-history--page-columns
-                           compilation-history--duration-expr)
-                   (vector limit offset))))
+    (compilation-history--select db
+                                 (format "SELECT %s, %s FROM compilations ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                         compilation-history--page-columns
+                                         compilation-history--duration-expr)
+                                 (vector limit offset))))
 
 (defun compilation-history--get-output (id)
   "Return the output for compilation record with ID, or nil."
   (compilation-history--with-db db
-    (caar (sqlite-select db
-                         "SELECT output FROM compilations WHERE id = ?"
-                         (vector id)))))
+    (caar (compilation-history--select db
+                                       "SELECT output FROM compilations WHERE id = ?"
+                                       (vector id)))))
 
 (defconst compilation-history--fts-column-names
   '("compile_command" "default_directory" "git_branch" "output")
@@ -461,16 +530,16 @@ Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
   (compilation-history--with-db db
     (let ((parts (compilation-history--like-sql-parts search-term)))
       (or (if (compilation-history--search-needs-like-p search-term)
-              (caar (sqlite-select db
-                                   (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
-                                   (cdr parts)))
-            (or (caar (sqlite-select db
-                                     "SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
-                                     (vector search-term)))
+              (caar (compilation-history--select db
+                                                 (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
+                                                 (cdr parts)))
+            (or (caar (compilation-history--select db
+                                                   "SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
+                                                   (vector search-term)))
                 ;; FTS returned nil — fall back to LIKE
-                (caar (sqlite-select db
-                                     (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
-                                     (cdr parts)))))
+                (caar (compilation-history--select db
+                                                   (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
+                                                   (cdr parts)))))
           0))))
 
 (defun compilation-history--query-page-fts (limit offset search-term)
@@ -480,24 +549,24 @@ Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
   (compilation-history--with-db db
     (let ((parts (compilation-history--like-sql-parts search-term)))
       (if (compilation-history--search-needs-like-p search-term)
-          (sqlite-select db
-                         (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                                 compilation-history--page-columns
-                                 compilation-history--duration-expr
-                                 (car parts))
-                         (vconcat (cdr parts) (vector limit offset)))
-        (or (sqlite-select db
-                           (format "SELECT %s, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                                   compilation-history--page-columns
-                                   compilation-history--duration-expr)
-                           (vector search-term limit offset))
+          (compilation-history--select db
+                                       (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                               compilation-history--page-columns
+                                               compilation-history--duration-expr
+                                               (car parts))
+                                       (vconcat (cdr parts) (vector limit offset)))
+        (or (compilation-history--select db
+                                         (format "SELECT %s, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                                 compilation-history--page-columns
+                                                 compilation-history--duration-expr)
+                                         (vector search-term limit offset))
             ;; FTS returned nil — fall back to LIKE
-            (sqlite-select db
-                           (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
-                                   compilation-history--page-columns
-                                   compilation-history--duration-expr
-                                   (car parts))
-                           (vconcat (cdr parts) (vector limit offset))))))))
+            (compilation-history--select db
+                                         (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY start_time DESC LIMIT ? OFFSET ?"
+                                                 compilation-history--page-columns
+                                                 compilation-history--duration-expr
+                                                 (car parts))
+                                         (vconcat (cdr parts) (vector limit offset))))))))
 
 (define-minor-mode compilation-history-buffer-mode
   "Minor mode for completed compilation-history buffers.
