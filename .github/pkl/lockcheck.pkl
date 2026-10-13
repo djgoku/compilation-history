@@ -1,0 +1,18 @@
+amends "pkl:test"
+
+import "pkl:json"
+import "PklProject" as Project
+
+local parser = new json.Parser { useMapping = true }
+local lock = parser.parse(read("PklProject.deps.json"))
+local uri = Project.dependencies["githubActions"].uri
+local key = "package://pkg.pkl-lang.org/pkl-pantry/com.github.actions@1"
+
+facts {
+  ["dependency lock matches declared pins"] {
+    lock["schemaVersion"] == 1
+    lock["resolvedDependencies"].toMap().keys == Set(key)
+    lock["resolvedDependencies"][key]["type"] == "remote"
+    lock["resolvedDependencies"][key]["uri"] == "project\(uri)"
+  }
+}

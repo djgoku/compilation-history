@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Test real workflow generation and drift detection"
+set -euo pipefail
+bash "${MISE_PROJECT_DIR:-.}/tests/test-workflows.sh"

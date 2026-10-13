@@ -335,3 +335,44 @@ Full-text search is supported via FTS5 on command, directory, branch, and output
 |------------------------------+----------------------------------------|
 | =compilation-history.el=     | Core tracking, hooks, and lifecycle    |
 | =compilation-history-view.el= | Searchable vtable-based history browser |
+
+* Development and CI
+
+Install the pinned tools with =mise install=, then run =mise run check= for
+melpazoid and the ERT suite. Run =mise run release-test= for the release script.
+
+GitHub workflows are generated from =.github/pkl/ci.pkl=. Edit the Pkl source
+and run =mise run workflows-generate=; commit both source and generated YAML.
+=mise run workflows-check= detects changed, missing, or unexpected workflow
+files and runs actionlint. =mise run workflows-test= exercises the generator
+against temporary fixtures.
+
+Dependency and action upgrades are deliberate: change the Pkl package pin or
+reviewed action SHA, then run =mise run workflows-update= and review the lock
+and YAML changes. Ordinary generation uses =PklProject.deps.json= without
+rewriting it. =mise.lock= pins tool downloads for Linux amd64 and macOS arm64.
+
+For CI release previews use =mise run release -- --dry-run --no-branch-check
+--allow-no-release=. The opt-in =--allow-no-release= flag succeeds without
+changes when there are no conventional commits to release. Other failures
+remain errors. Publishing pushes the release branch and only its new tag
+atomically, then creates the GitHub release. If release creation fails after
+the push, recover the GitHub release for the reported tag; do not rerun the
+version bump.
+
+The GitHub CI workflow requires Linux checks for Emacs 29.4 and 30.1 and
+reports master checks as advisory. Release-script tests and previews run on
+branch pushes and pull requests, with read-only repository access.
+
+GitHub publishing is disabled unless the repository variable
+=CI_PUBLISH_ENABLED= is exactly =true=. Only a tested main push in this
+repository can publish, after workflow, stable Emacs, and release validation
+checks pass. Before enabling it, disable the Cirrus publisher and confirm its
+queued and running release jobs have drained. Set the variable to =false=
+to pause GitHub publishing; finish any active publisher before restoring
+another CI publisher. Only one publisher may run at a time.
+
+=mise run ci-release -- <tested-sha>= publishes only when the checkout HEAD
+and freshly fetched origin/main both match the tested commit. Obsolete runs
+skip publishing. Fetch, preflight, push, and API failures remain errors.
+=mise run ci-release-test= verifies this behavior against local Git origins.

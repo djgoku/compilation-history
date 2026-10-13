@@ -1,0 +1,43 @@
+amends "pkl:test"
+
+import "ci.pkl" as ci
+
+local workflow = ci.output.value
+local release = workflow.jobs["release"]
+
+facts {
+  ["stable coverage and advisory master"] {
+    workflow.jobs["check-stable"].strategy.matrix["emacs"].toList() == List("29.4", "30.1")
+    workflow.jobs["check-stable"].strategy.`fail-fast` == false
+    workflow.jobs["check-master"].`continue-on-error` == true
+    release.needs.toList() == List("workflows", "check-stable", "release-validation")
+  }
+  ["publishing is restricted to enabled main pushes"] {
+    release.`if` == "github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'djgoku/compilation-history' && vars.CI_PUBLISH_ENABLED == 'true'"
+    workflow.on.push.branches.toList() == List("**")
+    workflow.on.pull_request.branches.toList() == List("main")
+    workflow.on.pull_request_target == null
+  }
+  ["only publishing can write"] {
+    workflow.permissions.contents == "read"
+    release.permissions.contents == "write"
+    workflow.jobs.toMap().entries.every((entry) ->
+      entry.key == "release" || entry.value.permissions == null || entry.value.permissions.contents != "write")
+    workflow.jobs.toMap().entries.every((entry) ->
+      entry.key == "release" || entry.value.steps.toList().every((step) ->
+        if (step.uses == null || !step.uses.startsWith("actions/checkout@"))
+          true
+        else
+          step.with["persist-credentials"] == false))
+  }
+  ["checks cannot cancel a publisher"] {
+    workflow.concurrency == null
+    release.concurrency.group == "compilation-history-release-main"
+    release.concurrency.`cancel-in-progress` == false
+  }
+  ["release validation has complete history"] {
+    workflow.jobs["release-validation"].steps[0].with["fetch-depth"] == 0
+    release.steps[0].with["fetch-depth"] == 0
+    release.steps[0].with["ref"] == "${{ github.sha }}"
+  }
+}

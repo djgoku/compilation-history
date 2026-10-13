@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#MISE description="Publish only the tested current main revision"
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: ci-release <tested-sha>" >&2
+  exit 2
+fi
+TASK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT="$(cd "${MISE_PROJECT_DIR:-$TASK_DIR/../..}" && pwd)"
+cd "$PROJECT"
+
+if ! tested_sha="$(git rev-parse --verify --end-of-options "${1}^{commit}" 2>/dev/null)"; then
+  echo "Error: invalid tested commit" >&2
+  exit 2
+fi
+if [ "$(git rev-parse HEAD)" != "$tested_sha" ]; then
+  echo "Error: checkout HEAD does not match tested commit $tested_sha" >&2
+  exit 1
+fi
+if ! git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main; then
+  echo "Error: failed to fetch origin/main" >&2
+  exit 1
+fi
+if [ "$(git rev-parse refs/remotes/origin/main)" != "$tested_sha" ]; then
+  echo "Skipping obsolete run: origin/main has advanced beyond tested commit $tested_sha"
+  exit 0
+fi
+
+git checkout -B main "$tested_sha"
+git config user.name 'github-actions[bot]'
+git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+mise run release -- --allow-no-release

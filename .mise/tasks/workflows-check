@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Check generated workflow drift and run actionlint"
+set -euo pipefail
+
+TASK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT="$(cd "${MISE_PROJECT_DIR:-$TASK_DIR/../..}" && pwd)"
+temporary="$(mktemp -d)"
+trap 'rm -rf "$temporary"' EXIT
+mkdir "$temporary/committed"
+bash "$TASK_DIR/workflows-generate" "$temporary/generated"
+pkl test --project-dir "$PROJECT/.github/pkl" "$PROJECT/.github/pkl/policy_test.pkl"
+shopt -s nullglob
+for workflow in "$PROJECT/.github/workflows/"*.yml "$PROJECT/.github/workflows/"*.yaml; do
+  cp "$workflow" "$temporary/committed/"
+done
+if ! diff -ru "$temporary/committed" "$temporary/generated"; then
+  echo "Generated workflows differ. Run mise run workflows-generate and commit the outputs." >&2
+  exit 1
+fi
+actionlint "$temporary/generated/ci.yml"
+echo "Workflow generation and actionlint passed"

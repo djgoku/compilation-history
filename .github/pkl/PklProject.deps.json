@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "resolvedDependencies": {
+    "package://pkg.pkl-lang.org/pkl-pantry/com.github.actions@1": {
+      "type": "remote",
+      "uri": "projectpackage://pkg.pkl-lang.org/pkl-pantry/com.github.actions@1.9.2",
+      "checksums": {
+        "sha256": "05e68a66a3876d2c11bbda260466485256e07e52be60ff7a4f59058aa53c27a4"
+      }
+    }
+  }
+}

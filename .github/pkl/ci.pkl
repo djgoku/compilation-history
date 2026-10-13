@@ -1,0 +1,183 @@
+amends "@githubActions/Workflow.pkl"
+
+import "@githubActions/Workflow.pkl" as Workflow
+
+local checkoutAction = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+local miseAction = "jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca"
+
+name = "CI"
+on {
+  push { branches { "**" } }
+  pull_request { branches { "main" } }
+}
+permissions { contents = "read" }
+env { ["MISE_YES"] = "1" }
+
+jobs {
+  ["workflows"] {
+    name = "Workflow validation"
+    `runs-on` = "ubuntu-24.04"
+    defaults { run { shell = "bash" } }
+    concurrency = new Workflow.Concurrency {
+      group = "ci-workflows-${{ github.ref }}"
+      `cancel-in-progress` = true
+    }
+    steps {
+      new {
+        uses = checkoutAction
+        with { ["persist-credentials"] = false }
+      }
+      new {
+        uses = miseAction
+        with { ["version"] = "2026.10.3" }
+      }
+      new { run = "mise run workflows-test" }
+      new { run = "mise run workflows-check" }
+    }
+  }
+  ["check-stable"] {
+    name = "Check (Emacs ${{ matrix.emacs }})"
+    `runs-on` = "ubuntu-24.04"
+    strategy {
+      `fail-fast` = false
+      matrix {
+        ["emacs"] { "29.4"; "30.1" }
+        ["include"] {
+          new Dynamic {
+            emacs = "29.4"
+            image = "silex/emacs:29.4-ci@sha256:80943847afc184c9cdda2de7c871cdd12fc520bc8d95b3a9eed231cbb1ed4dba"
+          }
+          new Dynamic {
+            emacs = "30.1"
+            image = "silex/emacs:30.1-ci@sha256:5195c71a40c297f0d4a46e3b3797765cf65384efbc117db44453589d291d374e"
+          }
+        }
+      }
+    }
+    container { image = "${{ matrix.image }}" }
+    defaults { run { shell = "bash" } }
+    concurrency = new Workflow.Concurrency {
+      group = "ci-emacs-${{ matrix.emacs }}-${{ github.ref }}"
+      `cancel-in-progress` = true
+    }
+    steps {
+      new {
+        uses = checkoutAction
+        with { ["persist-credentials"] = false }
+      }
+      new {
+        uses = miseAction
+        with {
+          ["version"] = "2026.10.3"
+          ["cache_key"] = "emacs-${{ matrix.emacs }}-${{ hashFiles('mise.lock', '.github/pkl/ci.pkl') }}"
+        }
+      }
+      new {
+        name = "Emacs build and SQLite capabilities"
+        run = #"""
+          emacs --batch --eval '(message (with-temp-buffer (emacs-build-description) (buffer-string)))'
+          emacs --batch --eval '(let ((db (sqlite-open))) (unwind-protect (sqlite-execute db "CREATE VIRTUAL TABLE probe USING fts5(content, tokenize=\"trigram\")") (sqlite-close db)))'
+          """#
+      }
+      new { run = "mise run check" }
+    }
+  }
+  ["check-master"] {
+    name = "Check (Emacs master, advisory)"
+    `runs-on` = "ubuntu-24.04"
+    `continue-on-error` = true
+    container { image = "silex/emacs:master-ci" }
+    defaults { run { shell = "bash" } }
+    concurrency = new Workflow.Concurrency {
+      group = "ci-emacs-master-${{ github.ref }}"
+      `cancel-in-progress` = true
+    }
+    steps {
+      new {
+        uses = checkoutAction
+        with { ["persist-credentials"] = false }
+      }
+      new {
+        uses = miseAction
+        with {
+          ["version"] = "2026.10.3"
+          ["cache_key"] = "emacs-master-${{ hashFiles('mise.lock', '.github/pkl/ci.pkl') }}"
+        }
+      }
+      new {
+        run = "emacs --batch --eval '(message (with-temp-buffer (emacs-build-description) (buffer-string)))'"
+      }
+      new { run = "mise run check" }
+    }
+  }
+  ["release-validation"] {
+    name = "Release validation"
+    `runs-on` = "ubuntu-24.04"
+    defaults { run { shell = "bash" } }
+    concurrency = new Workflow.Concurrency {
+      group = "ci-release-validation-${{ github.ref }}"
+      `cancel-in-progress` = true
+    }
+    steps {
+      new {
+        uses = checkoutAction
+        with {
+          ["persist-credentials"] = false
+          ["fetch-depth"] = 0
+        }
+      }
+      new {
+        uses = miseAction
+        with { ["version"] = "2026.10.3" }
+      }
+      new { run = "mise run release-test" }
+      new { run = "mise run ci-release-test" }
+      new { run = "mise run release -- --dry-run --no-branch-check --allow-no-release" }
+    }
+  }
+  ["release"] {
+    name = "Release"
+    `if` = "github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'djgoku/compilation-history' && vars.CI_PUBLISH_ENABLED == 'true'"
+    needs { "workflows"; "check-stable"; "release-validation" }
+    `runs-on` = "ubuntu-24.04"
+    defaults { run { shell = "bash" } }
+    permissions { contents = "write" }
+    concurrency = new Workflow.Concurrency {
+      group = "compilation-history-release-main"
+      `cancel-in-progress` = false
+    }
+    steps {
+      new {
+        uses = checkoutAction
+        with {
+          ["ref"] = "${{ github.sha }}"
+          ["fetch-depth"] = 0
+        }
+      }
+      new {
+        uses = miseAction
+        with { ["version"] = "2026.10.3" }
+      }
+      new {
+        name = "Publish the tested current main revision"
+        env { ["GITHUB_TOKEN"] = "${{ github.token }}" }
+        run = #"mise run ci-release -- "$GITHUB_SHA""#
+      }
+    }
+  }
+}
+
+output {
+  text = "# Generated from .github/pkl/ci.pkl. Run mise run workflows-generate.\n\(super.text)"
+  renderer {
+    converters {
+      ["jobs[*].steps[*].uses"] = (it) ->
+        if (it == checkoutAction)
+          new RenderDirective { text = " \(it) # v7.0.1" }
+        else if (it == miseAction)
+          new RenderDirective { text = " \(it) # v5.1.1" }
+        else
+          it
+    }
+  }
+}
