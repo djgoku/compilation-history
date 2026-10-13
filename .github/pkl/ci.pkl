@@ -107,7 +107,6 @@ jobs {
       new {
         run = "emacs --batch --eval '(message (with-temp-buffer (emacs-build-description) (buffer-string)))'"
       }
-      new { name = "Temporary advisory failure probe"; run = "exit 1" }
       new { run = "mise run check" }
     }
   }
