@@ -6,6 +6,3 @@ source = [".mise/tasks"]
 "conda:bash" = { version = "5.2.37", os = ["macos"] }
 pkl = "0.32.1"
 actionlint = "1.7.12"
-
-# [tools]
-# "aqua:cirruslabs/cirrus-cli" = "latest"

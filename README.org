@@ -367,7 +367,10 @@ branch pushes and pull requests, with read-only repository access.
 GitHub publishing is disabled unless the repository variable
 =CI_PUBLISH_ENABLED= is exactly =true=. Only a tested main push in this
 repository can publish, after workflow, stable Emacs, and release validation
-checks pass. Keep this variable unset during parallel validation with Cirrus.
+checks pass. Before enabling it, disable the Cirrus publisher and confirm its
+queued and running release jobs have drained. Set the variable to =false=
+to pause GitHub publishing; finish any active publisher before restoring
+another CI publisher. Only one publisher may run at a time.
 
 =mise run ci-release -- <tested-sha>= publishes only when the checkout HEAD
 and freshly fetched origin/main both match the tested commit. Obsolete runs

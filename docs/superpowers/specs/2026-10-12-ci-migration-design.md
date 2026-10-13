@@ -6,7 +6,7 @@ Date: October 12, 2026. Status: approved. Branch: `ci/mise-pkl-github-actions`, 
 
 ## Current behavior and required parity
 
-The current [.cirrus.yml](../../../.cirrus.yml) runs `mise run check` in Emacs 29.4, 30.1, and `master` containers. The stable versions must pass; `master` may fail. The [check task](../../../.mise/tasks/check) runs melpazoid and the ERT suite. Non-main branches also run a release preview and release-script tests. Main releases wait for both stable checks.
+The original [.cirrus.yml](https://github.com/djgoku/compilation-history/blob/cfc37a18469634696761e239d0517cfb96a2ca40/.cirrus.yml) runs `mise run check` in Emacs 29.4, 30.1, and `master` containers. The stable versions must pass; `master` may fail. The [check task](../../../.mise/tasks/check) runs melpazoid and the ERT suite. Non-main branches also run a release preview and release-script tests. Main releases wait for both stable checks.
 
 The [release task](../../../.mise/tasks/release) reads Git history and tags, updates version headers and `CHANGELOG.org`, creates a commit and tag, pushes them, and creates a GitHub release. It requires a clean checkout, Bash 4.3 or newer, and an actual `main` branch for publishing. Its conventional-commit version policy remains unchanged.
 
