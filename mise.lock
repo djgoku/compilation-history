@@ -307,7 +307,10 @@ conda_deps = [
 [[tools.gh]]
 version = "2.102.0"
 backend = "aqua:cli/cli"
-specifiers = ["latest"]
+specifiers = [
+    "2.102.0",
+    "latest",
+]
 
 [tools.gh."platforms.linux-x64"]
 checksum = "sha256:bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386"

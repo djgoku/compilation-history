@@ -15,9 +15,10 @@ run_test() {
   trap "rm -rf '$tmpdir'" RETURN
 
   cd "$tmpdir"
-  git init -q
+  git init -q -b main
   git config user.email "test@test.com"
   git config user.name "Test"
+  git config commit.gpgsign false
 
   # Create the two .el files
   for f in compilation-history.el compilation-history-view.el; do
@@ -217,12 +218,8 @@ test_missing_gh_aborts() {
   local tmpdir="$1"
   cd "$tmpdir"
   git commit -q --allow-empty -m "feat: something"
-  # Use a restricted PATH that excludes gh, but still has git and bash
-  local git_dir bash_dir
-  git_dir="$(dirname "$(command -v git)")"
-  bash_dir="$(dirname "$(command -v bash)")"
   local output
-  output=$(PATH="${git_dir}:${bash_dir}:/usr/bin:/bin" MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check 2>&1) && return 1
+  output=$(PATH="" MISE_PROJECT_DIR="$tmpdir" "$BASH" "$RELEASE_SCRIPT" --no-branch-check 2>&1) && return 1
   echo "$output" | grep -qi "gh"
 }
 
@@ -322,5 +319,168 @@ run_test "dry-run has no side effects" test_dry_run_no_side_effects
 run_test "dry-run shows markdown preview" test_dry_run_shows_markdown_preview
 run_test "end-to-end local release" test_end_to_end_local
 run_test "multi-release prepends correctly" test_multi_release
+
+snapshot_repo() {
+  git rev-parse HEAD
+  git show-ref --heads --tags || true
+  git status --porcelain
+  git hash-object compilation-history.el compilation-history-view.el
+  if [ -f CHANGELOG.org ]; then git hash-object CHANGELOG.org; fi
+}
+
+setup_remote() {
+  local fixture="$1"
+  mkdir -p "$fixture/.git/test-fixtures/bin" || return 1
+  git tag v0.1.0 || return 1
+  git init --bare -q -b main "$fixture/.git/test-fixtures/origin.git" || return 1
+  git remote add origin "$fixture/.git/test-fixtures/origin.git" || return 1
+  git push -q -u origin main refs/tags/v0.1.0 || return 1
+  cat > "$fixture/.git/test-fixtures/bin/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$1:$2" in
+  auth:status) exit "${FAKE_GH_AUTH_STATUS:-0}" ;;
+  release:create)
+    printf '%s\n' "$*" >> "$FIXTURE_GH_LOG"
+    cat >> "$FIXTURE_GH_LOG"
+    exit "${FAKE_GH_RELEASE_STATUS:-0}"
+    ;;
+  *) exit 99 ;;
+esac
+GHEOF
+  chmod +x "$fixture/.git/test-fixtures/bin/gh" || return 1
+  : > "$fixture/.git/test-fixtures/gh.log"
+}
+
+publish_fixture() {
+  local fixture="$1"
+  shift
+  PATH="$fixture/.git/test-fixtures/bin:$PATH" \
+    FIXTURE_GH_LOG="$fixture/.git/test-fixtures/gh.log" \
+    GITHUB_TOKEN=fixture-token MISE_PROJECT_DIR="$fixture" \
+    "$RELEASE_SCRIPT" "$@"
+}
+
+test_allow_no_release_dry_run_is_noop() {
+  local tmpdir="$1" before output
+  git tag v0.1.0 || return 1
+  git commit -q --allow-empty -m "Non-conventional change" || return 1
+  before="$(snapshot_repo)"
+  output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --dry-run --no-branch-check --allow-no-release 2>&1) || return 1
+  echo "$output" | grep -qi 'no releasable commits' || return 1
+  [ "$before" = "$(snapshot_repo)" ] || return 1
+  [ ! -e CHANGELOG.org ] || return 1
+}
+
+test_allow_no_release_publish_is_noop() {
+  local tmpdir="$1" before remote_before
+  setup_remote "$tmpdir" || return 1
+  git commit -q --allow-empty -m "Non-conventional change" || return 1
+  before="$(snapshot_repo)"
+  remote_before="$(git ls-remote origin)"
+  publish_fixture "$tmpdir" --allow-no-release || return 1
+  [ "$before" = "$(snapshot_repo)" ] || return 1
+  [ "$remote_before" = "$(git ls-remote origin)" ] || return 1
+  [ ! -s "$tmpdir/.git/test-fixtures/gh.log" ] || return 1
+}
+
+test_allow_no_release_still_releases_conventional_commits() {
+  local tmpdir="$1"
+  git tag v0.1.0 || return 1
+  git commit -q --allow-empty -m "fix: sample" || return 1
+  MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --local-only --allow-no-release || return 1
+  grep -q '^;; Version: 0.1.1$' compilation-history.el || return 1
+  grep -q '^;; Version: 0.1.1$' compilation-history-view.el || return 1
+  grep -q '^\* \[0.1.1\]' CHANGELOG.org || return 1
+  [ "$(git rev-parse v0.1.1)" = "$(git rev-parse HEAD)" ] || return 1
+  [ "$(git log -1 --format=%s)" = 'chore: release v0.1.1 [skip ci]' ] || return 1
+}
+
+test_allow_no_release_preserves_preflight_failures() {
+  local tmpdir="$1" output
+  git tag v0.1.0 || return 1
+  echo dirty > untracked.txt
+  if output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --dry-run --allow-no-release 2>&1); then return 1; fi
+  echo "$output" | grep -qi 'not clean' || return 1
+  rm untracked.txt || return 1
+  git checkout -q -b feature/no-release || return 1
+  if output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --dry-run --allow-no-release 2>&1); then return 1; fi
+  echo "$output" | grep -qi 'must be on main' || return 1
+  if output=$(PATH="" MISE_PROJECT_DIR="$tmpdir" "$BASH" "$RELEASE_SCRIPT" --allow-no-release 2>&1); then return 1; fi
+  echo "$output" | grep -qi 'gh CLI not found' || return 1
+}
+
+test_allow_no_release_preserves_auth_failure() {
+  local tmpdir="$1" before output
+  setup_remote "$tmpdir" || return 1
+  before="$(snapshot_repo)"
+  if output=$(PATH="$tmpdir/.git/test-fixtures/bin:$PATH" GITHUB_TOKEN="" GH_TOKEN="" \
+    FAKE_GH_AUTH_STATUS=1 MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --allow-no-release 2>&1); then return 1; fi
+  echo "$output" | grep -qi 'not authenticated' || return 1
+  [ "$before" = "$(snapshot_repo)" ] || return 1
+}
+
+test_allow_no_release_preserves_tag_collision() {
+  local tmpdir="$1" other before output
+  git tag v0.1.0 || return 1
+  git commit -q --allow-empty -m "fix: sample" || return 1
+  other=$(printf 'Unrelated\n' | git commit-tree "$(git write-tree)") || return 1
+  git tag v0.1.1 "$other" || return 1
+  before="$(snapshot_repo)"
+  if output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --dry-run --allow-no-release 2>&1); then return 1; fi
+  echo "$output" | grep -qi 'already exists' || return 1
+  [ "$before" = "$(snapshot_repo)" ] || return 1
+}
+
+test_publish_pushes_only_release_branch_and_new_tag() {
+  local tmpdir="$1" other
+  setup_remote "$tmpdir" || return 1
+  git commit -q --allow-empty -m "fix: sample" || return 1
+  other=$(printf 'Unrelated\n' | git commit-tree "$(git write-tree)") || return 1
+  git tag unrelated "$other" || return 1
+  git branch unrelated "$other" || return 1
+  publish_fixture "$tmpdir" || return 1
+  [ "$(git --git-dir="$tmpdir/.git/test-fixtures/origin.git" rev-parse main)" = "$(git rev-parse HEAD)" ] || return 1
+  [ "$(git --git-dir="$tmpdir/.git/test-fixtures/origin.git" rev-parse v0.1.1)" = "$(git rev-parse HEAD)" ] || return 1
+  [ -z "$(git ls-remote origin refs/tags/unrelated refs/heads/unrelated)" ] || return 1
+  grep -q '^release create v0.1.1 --title v0.1.1 --notes-file -$' "$tmpdir/.git/test-fixtures/gh.log" || return 1
+}
+
+test_publish_push_is_atomic() {
+  local tmpdir="$1" before
+  setup_remote "$tmpdir" || return 1
+  before=$(git rev-parse HEAD)
+  git commit -q --allow-empty -m "fix: sample" || return 1
+  cat > "$tmpdir/.git/test-fixtures/origin.git/hooks/update" <<'HOOKEOF'
+#!/bin/sh
+[ "$1" != refs/tags/v0.1.1 ]
+HOOKEOF
+  chmod +x "$tmpdir/.git/test-fixtures/origin.git/hooks/update" || return 1
+  publish_fixture "$tmpdir" > "$tmpdir/.git/test-fixtures/output.log" 2>&1 && return 1
+  [ "$(git --git-dir="$tmpdir/.git/test-fixtures/origin.git" rev-parse main)" = "$before" ] || return 1
+  [ -z "$(git ls-remote origin refs/tags/v0.1.1)" ] || return 1
+  [ ! -s "$tmpdir/.git/test-fixtures/gh.log" ] || return 1
+}
+
+test_publish_reports_gh_failure_after_push() {
+  local tmpdir="$1" output
+  setup_remote "$tmpdir" || return 1
+  git commit -q --allow-empty -m "fix: sample" || return 1
+  if output=$(FAKE_GH_RELEASE_STATUS=1 publish_fixture "$tmpdir" --allow-no-release 2>&1); then return 1; fi
+  [ "$(git --git-dir="$tmpdir/.git/test-fixtures/origin.git" rev-parse main)" = "$(git rev-parse HEAD)" ] || return 1
+  [ "$(git --git-dir="$tmpdir/.git/test-fixtures/origin.git" rev-parse v0.1.1)" = "$(git rev-parse HEAD)" ] || return 1
+  echo "$output" | grep -q 'v0.1.1' || return 1
+  echo "$output" | grep -qi 'recover' || return 1
+  if echo "$output" | grep -q 'Created GitHub release'; then return 1; fi
+}
+
+run_test "allow no release dry-run is a no-op" test_allow_no_release_dry_run_is_noop
+run_test "allow no release publishing is a no-op" test_allow_no_release_publish_is_noop
+run_test "allow no release still bumps conventional commits" test_allow_no_release_still_releases_conventional_commits
+run_test "allow no release preserves preflight failures" test_allow_no_release_preserves_preflight_failures
+run_test "allow no release preserves authentication failures" test_allow_no_release_preserves_auth_failure
+run_test "allow no release preserves tag collisions" test_allow_no_release_preserves_tag_collision
+run_test "publish pushes only the release branch and new tag" test_publish_pushes_only_release_branch_and_new_tag
+run_test "publish pushes branch and tag atomically" test_publish_push_is_atomic
+run_test "publish reports GitHub API failure after push" test_publish_reports_gh_failure_after_push
 
 summary

@@ -351,3 +351,11 @@ Dependency and action upgrades are deliberate: change the Pkl package pin or
 reviewed action SHA, then run =mise run workflows-update= and review the lock
 and YAML changes. Ordinary generation uses =PklProject.deps.json= without
 rewriting it. =mise.lock= pins tool downloads for Linux amd64 and macOS arm64.
+
+For CI release previews use =mise run release -- --dry-run --no-branch-check
+--allow-no-release=. The opt-in =--allow-no-release= flag succeeds without
+changes when there are no conventional commits to release. Other failures
+remain errors. Publishing pushes the release branch and only its new tag
+atomically, then creates the GitHub release. If release creation fails after
+the push, recover the GitHub release for the reported tag; do not rerun the
+version bump.

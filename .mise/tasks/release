@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Bump version, update changelog, tag, and release"
-#MISE tools={gh="latest"}
+#MISE tools={gh="2.102.0"}
 set -euo pipefail
 
 # Requires bash 4.3+ for nameref support
@@ -19,12 +19,14 @@ EL_FILES=(
 DRY_RUN=false
 NO_BRANCH_CHECK=false
 LOCAL_ONLY=false
+ALLOW_NO_RELEASE=false
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
     --no-branch-check) NO_BRANCH_CHECK=true ;;
     --local-only) LOCAL_ONLY=true ;;
+    --allow-no-release) ALLOW_NO_RELEASE=true ;;
     *) echo "Unknown flag: $arg"; exit 1 ;;
   esac
 done
@@ -229,6 +231,10 @@ last_tag=$(get_last_tag)
 bump_type=$(compute_bump "$last_tag")
 
 if [ "$bump_type" = "none" ]; then
+  if "$ALLOW_NO_RELEASE"; then
+    echo "No releasable commits found since ${last_tag:-beginning}; skipping release"
+    exit 0
+  fi
   echo "Error: no releasable commits found since ${last_tag:-beginning}" >&2
   exit 1
 fi
@@ -285,12 +291,15 @@ fi
 
 # --- Remote operations ---
 
-git push
-git push --tags
+release_branch="$(git branch --show-current)"
+git push --atomic origin "HEAD:refs/heads/${release_branch}" "refs/tags/v${new_version}"
 echo "Pushed to remote"
 
-org_to_markdown "$changelog_section" | gh release create "v${new_version}" \
+if ! org_to_markdown "$changelog_section" | gh release create "v${new_version}" \
   --title "v${new_version}" \
-  --notes-file -
+  --notes-file -; then
+  echo "Error: branch and tag v${new_version} were pushed, but GitHub release creation failed. Recover that tag without rerunning the version bump." >&2
+  exit 1
+fi
 
 echo "Created GitHub release v${new_version}"
