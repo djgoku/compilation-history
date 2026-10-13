@@ -2,7 +2,7 @@
 
 Move CI orchestration from Cirrus to GitHub Actions, keep executable commands in mise, and maintain workflows as Pkl source with committed generated YAML. Preserve the Linux Emacs checks and automatic releases from `main`.
 
-Date: October 12, 2026. Status: proposed design for review. Branch: `ci/mise-pkl-github-actions`, based on `origin/main` at `cfc37a1`.
+Date: October 12, 2026. Status: approved. Branch: `ci/mise-pkl-github-actions`, based on `origin/main` at `cfc37a1`.
 
 ## Current behavior and required parity
 
