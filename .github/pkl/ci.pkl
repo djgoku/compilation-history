@@ -131,6 +131,7 @@ jobs {
         with { ["version"] = "2026.10.3" }
       }
       new { run = "mise run release-test" }
+      new { run = "mise run ci-release-test" }
       new { run = "mise run release -- --dry-run --no-branch-check --allow-no-release" }
     }
   }

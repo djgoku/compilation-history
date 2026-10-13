@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Test publishing guards against a local Git origin"
+set -euo pipefail
+bash "${MISE_PROJECT_DIR:-.}/tests/test-ci-release.sh"

@@ -103,6 +103,7 @@ jobs:
       with:
         version: 2026.10.3
     - run: mise run release-test
+    - run: mise run ci-release-test
     - run: mise run release -- --dry-run --no-branch-check --allow-no-release
     defaults:
       run:

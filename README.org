@@ -368,3 +368,8 @@ GitHub publishing is disabled unless the repository variable
 =CI_PUBLISH_ENABLED= is exactly =true=. Only a tested main push in this
 repository can publish, after workflow, stable Emacs, and release validation
 checks pass. Keep this variable unset during parallel validation with Cirrus.
+
+=mise run ci-release -- <tested-sha>= publishes only when the checkout HEAD
+and freshly fetched origin/main both match the tested commit. Obsolete runs
+skip publishing. Fetch, preflight, push, and API failures remain errors.
+=mise run ci-release-test= verifies this behavior against local Git origins.
