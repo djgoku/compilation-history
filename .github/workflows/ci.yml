@@ -81,6 +81,8 @@ jobs:
         version: 2026.10.3
         cache_key: emacs-master-${{ hashFiles('mise.lock', '.github/pkl/ci.pkl') }}
     - run: emacs --batch --eval '(message (with-temp-buffer (emacs-build-description) (buffer-string)))'
+    - name: Temporary advisory failure probe
+      run: exit 1
     - run: mise run check
     container:
       image: silex/emacs:master-ci
