@@ -36,7 +36,11 @@ get_current_version() {
 }
 
 get_last_tag() {
-  git describe --tags --abbrev=0 2>/dev/null || echo ""
+  local reachable_tags
+  reachable_tags=$(git tag --merged HEAD) || return
+  if [ -n "$reachable_tags" ]; then
+    git describe --tags --abbrev=0
+  fi
 }
 
 # Returns: "minor", "patch", or "none"
@@ -49,9 +53,13 @@ compute_bump() {
     log_range="HEAD"
   fi
 
+  local commits
+  commits=$(git log --oneline "$log_range") || return
+
   local bump="none"
   while IFS= read -r line; do
-    local hash subject
+    [ -n "$line" ] || continue
+    local hash subject body
     hash=$(echo "$line" | cut -d' ' -f1)
     subject=$(echo "$line" | cut -d' ' -f2-)
 
@@ -62,7 +70,8 @@ compute_bump() {
     fi
 
     # Check for BREAKING CHANGE in body
-    if git log -1 --format='%b' "$hash" | grep -q 'BREAKING CHANGE'; then
+    body=$(git log -1 --format='%b' "$hash") || return
+    if echo "$body" | grep -q 'BREAKING CHANGE'; then
       bump="minor"
       break
     fi
@@ -71,7 +80,7 @@ compute_bump() {
     if echo "$subject" | grep -qE '^(feat|fix|refactor|perf|chore|docs|test|ci|build)(\([^)]*\))?!?:'; then
       bump="patch"
     fi
-  done < <(git log --oneline "$log_range" 2>/dev/null)
+  done <<< "$commits"
 
   echo "$bump"
 }
@@ -100,9 +109,13 @@ classify_commit() {
   fi
 
   # Check for BREAKING CHANGE in body
-  if [ -n "$hash" ] && git log -1 --format='%b' "$hash" | grep -q 'BREAKING CHANGE'; then
-    echo "breaking"
-    return
+  if [ -n "$hash" ]; then
+    local body
+    body=$(git log -1 --format='%b' "$hash") || return
+    if echo "$body" | grep -q 'BREAKING CHANGE'; then
+      echo "breaking"
+      return
+    fi
   fi
 
   local type
@@ -140,12 +153,15 @@ generate_changelog_section() {
   fi
 
   local -a breaking=() added=() fixed=() changed=() other=()
+  local commits
+  commits=$(git log --oneline "$log_range") || return
 
   while IFS= read -r line; do
+    [ -n "$line" ] || continue
     local hash subject category stripped
     hash=$(echo "$line" | cut -d' ' -f1)
     subject=$(echo "$line" | cut -d' ' -f2-)
-    category=$(classify_commit "$subject" "$hash")
+    category=$(classify_commit "$subject" "$hash") || return
     stripped=$(strip_prefix "$subject")
 
     case "$category" in
@@ -155,7 +171,7 @@ generate_changelog_section() {
       changed) changed+=("$stripped") ;;
       other) other+=("$stripped") ;;
     esac
-  done < <(git log --oneline "$log_range" 2>/dev/null)
+  done <<< "$commits"
 
   local section=""
   section+="* [${new_version}] - $(date +%Y-%m-%d)"

@@ -322,7 +322,7 @@ run_test "multi-release prepends correctly" test_multi_release
 
 snapshot_repo() {
   git rev-parse HEAD
-  git show-ref --heads --tags || true
+  git for-each-ref --format='%(objectname) %(refname)' refs/heads refs/tags
   git status --porcelain
   git hash-object compilation-history.el compilation-history-view.el
   if [ -f CHANGELOG.org ]; then git hash-object CHANGELOG.org; fi
@@ -482,5 +482,24 @@ run_test "allow no release preserves tag collisions" test_allow_no_release_prese
 run_test "publish pushes only the release branch and new tag" test_publish_pushes_only_release_branch_and_new_tag
 run_test "publish pushes branch and tag atomically" test_publish_push_is_atomic
 run_test "publish reports GitHub API failure after push" test_publish_reports_gh_failure_after_push
+
+test_allow_no_release_rejects_unreadable_history() {
+  local tmpdir="$1" tagged="${2:-false}" parent before output
+  parent=$(git rev-parse HEAD)
+  if "$tagged"; then git tag v0.1.0 || return 1; fi
+  git commit -q --allow-empty -m 'Non-conventional change' || return 1
+  before="$(snapshot_repo)"
+  rm ".git/objects/${parent:0:2}/${parent:2}" || return 1
+  if output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --dry-run --allow-no-release 2>&1); then return 1; fi
+  echo "$output" | grep -qi 'bad object\|could not read\|failed to traverse' || return 1
+  if echo "$output" | grep -qi 'skipping release'; then return 1; fi
+  [ "$before" = "$(snapshot_repo)" ] || return 1
+}
+
+run_test "allow no release rejects unreadable history" test_allow_no_release_rejects_unreadable_history
+test_allow_no_release_rejects_unreadable_tagged_history() {
+  test_allow_no_release_rejects_unreadable_history "$1" true
+}
+run_test "allow no release rejects unreadable tagged history" test_allow_no_release_rejects_unreadable_tagged_history
 
 summary
