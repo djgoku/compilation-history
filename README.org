@@ -335,3 +335,19 @@ Full-text search is supported via FTS5 on command, directory, branch, and output
 |------------------------------+----------------------------------------|
 | =compilation-history.el=     | Core tracking, hooks, and lifecycle    |
 | =compilation-history-view.el= | Searchable vtable-based history browser |
+
+* Development and CI
+
+Install the pinned tools with =mise install=, then run =mise run check= for
+melpazoid and the ERT suite. Run =mise run release-test= for the release script.
+
+GitHub workflows are generated from =.github/pkl/ci.pkl=. Edit the Pkl source
+and run =mise run workflows-generate=; commit both source and generated YAML.
+=mise run workflows-check= detects changed, missing, or unexpected workflow
+files and runs actionlint. =mise run workflows-test= exercises the generator
+against temporary fixtures.
+
+Dependency and action upgrades are deliberate: change the Pkl package pin or
+reviewed action SHA, then run =mise run workflows-update= and review the lock
+and YAML changes. Ordinary generation uses =PklProject.deps.json= without
+rewriting it. =mise.lock= pins tool downloads for Linux amd64 and macOS arm64.

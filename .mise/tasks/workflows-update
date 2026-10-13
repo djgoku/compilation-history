@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Resolve intentionally changed Pkl pins and regenerate workflows"
+set -euo pipefail
+
+TASK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT="$(cd "${MISE_PROJECT_DIR:-$TASK_DIR/../..}" && pwd)"
+pkl project resolve "$PROJECT/.github/pkl"
+bash "$TASK_DIR/workflows-generate"
+bash "$TASK_DIR/workflows-check"

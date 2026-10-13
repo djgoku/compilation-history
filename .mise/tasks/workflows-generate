@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Generate GitHub Actions YAML from pinned Pkl source"
+set -euo pipefail
+
+TASK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT="$(cd "${MISE_PROJECT_DIR:-$TASK_DIR/../..}" && pwd)"
+destination="${1:-$PROJECT/.github/workflows}"
+if [ "$#" -gt 1 ]; then
+  echo "Usage: workflows-generate [output-directory]" >&2
+  exit 2
+fi
+
+pkl test --no-project "$PROJECT/.github/pkl/lockcheck.pkl"
+temporary="$(mktemp -d)"
+trap 'rm -rf "$temporary"' EXIT
+pkl eval --project-dir "$PROJECT/.github/pkl" \
+  -o "$temporary/ci.yml" "$PROJECT/.github/pkl/ci.pkl"
+mkdir -p "$destination"
+cp "$temporary/ci.yml" "$destination/.ci.yml.tmp"
+mv "$destination/.ci.yml.tmp" "$destination/ci.yml"
+echo "Generated $destination/ci.yml"

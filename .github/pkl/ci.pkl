@@ -1,0 +1,46 @@
+amends "@githubActions/Workflow.pkl"
+
+local checkoutAction = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+local miseAction = "jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca"
+
+name = "CI"
+on {
+  push { branches { "**" } }
+  pull_request { branches { "main" } }
+}
+permissions { contents = "read" }
+
+jobs {
+  ["workflows"] {
+    name = "Workflow validation"
+    `runs-on` = "ubuntu-24.04"
+    defaults { run { shell = "bash" } }
+    steps {
+      new {
+        uses = checkoutAction
+        with { ["persist-credentials"] = false }
+      }
+      new {
+        uses = miseAction
+        with { ["version"] = "2026.10.3" }
+      }
+      new { run = "mise run workflows-test" }
+      new { run = "mise run workflows-check" }
+    }
+  }
+}
+
+output {
+  text = "# Generated from .github/pkl/ci.pkl. Run mise run workflows-generate.\n\(super.text)"
+  renderer {
+    converters {
+      ["jobs[*].steps[*].uses"] = (it) ->
+        if (it == checkoutAction)
+          new RenderDirective { text = " \(it) # v7.0.1" }
+        else if (it == miseAction)
+          new RenderDirective { text = " \(it) # v5.1.1" }
+        else
+          it
+    }
+  }
+}

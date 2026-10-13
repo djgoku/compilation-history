@@ -1,0 +1,7 @@
+amends "pkl:Project"
+
+dependencies {
+  ["githubActions"] {
+    uri = "package://pkg.pkl-lang.org/pkl-pantry/com.github.actions@1.9.2"
+  }
+}
