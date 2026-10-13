@@ -359,3 +359,12 @@ remain errors. Publishing pushes the release branch and only its new tag
 atomically, then creates the GitHub release. If release creation fails after
 the push, recover the GitHub release for the reported tag; do not rerun the
 version bump.
+
+The GitHub CI workflow requires Linux checks for Emacs 29.4 and 30.1 and
+reports master checks as advisory. Release-script tests and previews run on
+branch pushes and pull requests, with read-only repository access.
+
+GitHub publishing is disabled unless the repository variable
+=CI_PUBLISH_ENABLED= is exactly =true=. Only a tested main push in this
+repository can publish, after workflow, stable Emacs, and release validation
+checks pass. Keep this variable unset during parallel validation with Cirrus.

@@ -8,6 +8,7 @@ temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
 mkdir "$temporary/committed"
 bash "$TASK_DIR/workflows-generate" "$temporary/generated"
+pkl test --project-dir "$PROJECT/.github/pkl" "$PROJECT/.github/pkl/policy_test.pkl"
 shopt -s nullglob
 for workflow in "$PROJECT/.github/workflows/"*.yml "$PROJECT/.github/workflows/"*.yaml; do
   cp "$workflow" "$temporary/committed/"

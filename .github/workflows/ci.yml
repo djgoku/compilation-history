@@ -8,11 +8,16 @@ name: CI
   push:
     branches:
     - '**'
+env:
+  MISE_YES: '1'
 permissions:
   contents: read
 jobs:
   workflows:
     name: Workflow validation
+    concurrency:
+      group: ci-workflows-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,6 +28,110 @@ jobs:
         version: 2026.10.3
     - run: mise run workflows-test
     - run: mise run workflows-check
+    defaults:
+      run:
+        shell: bash
+  check-stable:
+    name: Check (Emacs ${{ matrix.emacs }})
+    concurrency:
+      group: ci-emacs-${{ matrix.emacs }}-${{ github.ref }}
+      cancel-in-progress: true
+    strategy:
+      matrix:
+        emacs:
+        - '29.4'
+        - '30.1'
+        include:
+        - emacs: '29.4'
+          image: silex/emacs:29.4-ci@sha256:80943847afc184c9cdda2de7c871cdd12fc520bc8d95b3a9eed231cbb1ed4dba
+        - emacs: '30.1'
+          image: silex/emacs:30.1-ci@sha256:5195c71a40c297f0d4a46e3b3797765cf65384efbc117db44453589d291d374e
+      fail-fast: false
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      with:
+        version: 2026.10.3
+        cache_key: emacs-${{ matrix.emacs }}-${{ hashFiles('mise.lock', '.github/pkl/ci.pkl') }}
+    - name: Emacs build and SQLite capabilities
+      run: |-
+        emacs --batch --eval '(message (with-temp-buffer (emacs-build-description) (buffer-string)))'
+        emacs --batch --eval '(let ((db (sqlite-open))) (unwind-protect (sqlite-execute db "CREATE VIRTUAL TABLE probe USING fts5(content, tokenize=\"trigram\")") (sqlite-close db)))'
+    - run: mise run check
+    container:
+      image: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+  check-master:
+    name: Check (Emacs master, advisory)
+    concurrency:
+      group: ci-emacs-master-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      with:
+        version: 2026.10.3
+        cache_key: emacs-master-${{ hashFiles('mise.lock', '.github/pkl/ci.pkl') }}
+    - run: emacs --batch --eval '(message (with-temp-buffer (emacs-build-description) (buffer-string)))'
+    - run: mise run check
+    container:
+      image: silex/emacs:master-ci
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+  release-validation:
+    name: Release validation
+    concurrency:
+      group: ci-release-validation-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+    - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      with:
+        version: 2026.10.3
+    - run: mise run release-test
+    - run: mise run release -- --dry-run --no-branch-check --allow-no-release
+    defaults:
+      run:
+        shell: bash
+  release:
+    name: Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'djgoku/compilation-history' && vars.CI_PUBLISH_ENABLED == 'true'
+    needs:
+    - workflows
+    - check-stable
+    - release-validation
+    concurrency:
+      group: compilation-history-release-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+    - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      with:
+        version: 2026.10.3
+    - name: Publish the tested current main revision
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: mise run ci-release -- "$GITHUB_SHA"
     defaults:
       run:
         shell: bash
