@@ -196,6 +196,30 @@
         (setq compile-command orig-compile-command)
         (setq compilation-history-db-file orig-db-file)))))
 
+(ert-deftest test-saved-output-matches-buffer-with-and-without-final-newline ()
+  "Saved output must equal the buffer text whether or not output ends in a newline."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (compilation-history-mode 1)
+    (unwind-protect
+        (dolist (command '("printf abc" "printf 'abc\\n'"))
+          (compile command)
+          (while compilation-in-progress
+            (sit-for 0.1))
+          (let ((buffer (seq-find (lambda (buf)
+                                    (string-prefix-p "*compilation-history-" (buffer-name buf)))
+                                  (buffer-list))))
+            (unwind-protect
+                (with-current-buffer buffer
+                  (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                                 (compilation-history--with-db db
+                                   (caar (sqlite-select
+                                          db "SELECT output FROM compilations WHERE id = ?"
+                                          (vector (compilation-history-record-id
+                                                   compilation-history-record))))))))
+              (kill-buffer buffer))))
+      (compilation-history-mode -1))))
+
 (ert-deftest test-compile-from-non-compilation-buffer ()
   "Test that compile from a regular buffer creates a compilation-history buffer."
   (compilation-history-test-with-db

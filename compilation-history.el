@@ -530,11 +530,11 @@ Adds recompile and quit bindings and sets the buffer read-only."
       (remove-hook 'compilation-filter-hook #'compilation-history--capture-raw-output t)
       (remove-hook 'comint-preoutput-filter-functions
                    #'compilation-history--comint-capture-raw-output t)
+      ;; `compilation-handle-exit' marks the finish message it inserts.
       (let* ((footer (buffer-substring-no-properties
-                      (save-excursion
-                        (goto-char (point-max))
-                        (forward-line -2)
-                        (line-beginning-position))
+                      (or (previous-single-property-change
+                           (point-max) 'compilation-handle-exit)
+                          (point-max))
                       (point-max)))
              (output (if compilation-history--header
                          (concat compilation-history--header
