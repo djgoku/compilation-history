@@ -511,7 +511,9 @@ Adds recompile and quit bindings and sets the buffer read-only."
 
 (defun compilation-history--finish-function (buffer status)
   "Handle compilation finish for BUFFER with STATUS."
-  (when-let* ((record-id (compilation-history-record-id (buffer-local-value 'compilation-history-record buffer))))
+  (when-let* ((record-id (and (buffer-live-p buffer)
+                            (compilation-history-record-id
+                             (buffer-local-value 'compilation-history-record buffer)))))
     (with-current-buffer buffer
       ;; Cancel incremental save — final save captures everything
       (compilation-history--cancel-save-timer)
@@ -530,7 +532,7 @@ Adds recompile and quit bindings and sets the buffer read-only."
                                  compilation-history--raw-output
                                  footer)
                        (buffer-substring-no-properties (point-min) (point-max))))
-             (killed (string-match-p "killed\|interrupt" status))
+             (killed (string-match-p (rx (or "killed" "interrupt")) status))
              (exit-code (compilation-history-exit-code (buffer-local-value 'compilation-history-record buffer))))
         (compilation-history--update-compilation-record record-id exit-code output killed)
         (compilation-history-buffer-mode 1)))))
@@ -551,11 +553,14 @@ Avoids marking a record as killed when it already exited successfully."
           (compilation-history--update-compilation-record record-id -1 output t))))))
 
 (defun compilation-history--add-sentinel-metadata-advice (proc msg)
-  "Debug advice for `compilation-sentinel' logging PROC and MSG metadata."
-  (let* ((buffer (process-buffer proc)))
-    (with-current-buffer buffer
-      (setf (compilation-history-exit-code compilation-history-record) (process-exit-status proc)
-            (compilation-history-message compilation-history-record) msg))))
+  "Record exit metadata from PROC and MSG when its history buffer is live."
+  (let ((buffer (process-buffer proc)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (compilation-history-p compilation-history-record)
+          (setf (compilation-history-exit-code compilation-history-record)
+                (process-exit-status proc)
+                (compilation-history-message compilation-history-record) msg))))))
 
 (defun compilation-history--maybe-save-history ()
   "Save output for in-progress compilations when Emacs is closing."
