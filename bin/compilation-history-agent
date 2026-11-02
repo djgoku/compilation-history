@@ -1,0 +1,193 @@
+#!/bin/sh
+":"; exec emacs -Q --script "$0" -- "$@" # -*- mode: emacs-lisp; lexical-binding: t -*-
+;; Local-server client.  The sh line passes "--" so Emacs leaves every
+;; argument to this script instead of parsing options such as --version.
+
+(require 'server)
+(require 'cl-lib)
+
+(defvar ch-agent-cli-selector
+  (let ((env (getenv "COMPILATION_HISTORY_AGENT_SERVER")))
+    (unless (equal env "") env)))
+
+(defun ch-agent-cli-error (code message &optional id)
+  "Return a protocol error with CODE and MESSAGE, recoverable by ID."
+  (append `((protocol_version . 1) (error . ,code) (message . ,message))
+          (when id `((id . ,id) (recovery . ,(concat "get " id))))))
+
+(defun ch-agent-cli-fail (code message &optional id)
+  "Finish with the protocol error CODE, MESSAGE and ID."
+  (throw 'reply (ch-agent-cli-error code message id)))
+
+(defun ch-agent-cli-valid-id-p (id)
+  (and (stringp id) (string-match-p "\\`[0-9]\\{8\\}T[0-9]\\{12\\}\\'" id)))
+
+(defun ch-agent-cli-server ()
+  "Return the server name or socket path, resolved as emacsclient does."
+  (let ((name (or ch-agent-cli-selector (getenv "EMACS_SOCKET_NAME") "server")))
+    (if (string-search "/" name) (expand-file-name name) name)))
+
+(defun ch-agent-cli-read (text)
+  "Read TEXT as one reply alist, or return nil."
+  (let ((reply (ignore-errors (car (read-from-string text)))))
+    (and (consp reply) (eql 1 (alist-get 'protocol_version reply)) reply)))
+
+(defun ch-agent-cli-request (request id)
+  "Send REQUEST to the selected server and return its reply.
+ID is the compilation whose `get' recovers from a failure."
+  (let* ((printed (condition-case nil
+                      (server-eval-at (ch-agent-cli-server)
+                                      `(and (fboundp 'compilation-history-agent-request)
+                                            (compilation-history-agent-request ',request)))
+                    (error (ch-agent-cli-fail "server_unavailable"
+                                              "Cannot contact the selected Emacs server" id))))
+         (reply (cond ((null printed)
+                       (ch-agent-cli-fail "interface_unavailable"
+                                          "Load compilation-history-agent in the selected server" id))
+                      ((stringp printed) (ch-agent-cli-read printed)))))
+    (unless reply
+      (ch-agent-cli-fail "invalid_response" "Unsupported Emacs protocol response" id))
+    (if-let* ((file (alist-get 'output_file reply)))
+        (unwind-protect
+            (let ((output (condition-case nil
+                              (with-temp-buffer
+                                (let ((coding-system-for-read 'utf-8))
+                                  (insert-file-contents file))
+                                (buffer-string))
+                            (error (ch-agent-cli-fail "invalid_response"
+                                                      "Cannot read complete output" id)))))
+              (append (assq-delete-all 'output_file reply) `((output . ,output))))
+          (ignore-errors (delete-file file)))
+      reply)))
+
+(defun ch-agent-cli-wait (id)
+  "Block on the interface socket until ID's job has a result."
+  (let ((socket (alist-get 'socket (ch-agent-cli-request '(:op doctor) id))))
+    (unless (stringp socket)
+      (ch-agent-cli-fail "interface_disabled" "Agent interface is disabled" id))
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (let ((client (condition-case nil
+                        (make-network-process :name "wait" :family 'local :service socket
+                                              :buffer (current-buffer) :coding 'binary
+                                              :sentinel #'ignore :noquery t)
+                      (error (ch-agent-cli-fail
+                              "wait_unavailable"
+                              "Cannot receive the wait result; try get for persisted output" id)))))
+        (process-send-string client (concat id "\n"))
+        (while (process-live-p client)
+          (accept-process-output client 1))
+        ;; A reply cut short by a disconnect cannot be read as a whole list.
+        (or (ch-agent-cli-read (decode-coding-string (buffer-string) 'utf-8))
+            (ch-agent-cli-fail "server_disconnected"
+                               "Wait connection ended before a complete result" id))))))
+
+(defun ch-agent-cli-loaded-servers ()
+  "Return the sockets beside the selected server whose Emacs has the module."
+  (let* ((name (ch-agent-cli-server))
+         (dir (if (string-search "/" name) (file-name-directory name) server-socket-dir)))
+    (cl-loop for socket in (ignore-errors (directory-files dir t "\\`[^.]"))
+             when (and (string-prefix-p "s" (file-attribute-modes (file-attributes socket)))
+                       ;; A socket that is not an Emacs server, such as pinentry's,
+                       ;; may never answer.
+                       (eq t (ignore-errors
+                               (with-timeout (1 nil)
+                                 (server-eval-at socket '(fboundp 'compilation-history-agent-request))))))
+             collect socket)))
+
+(defun ch-agent-cli-doctor ()
+  "Report the selected server's health, or name servers that could serve."
+  (let ((reply (catch 'reply (ch-agent-cli-request '(:op doctor) nil))))
+    (if (not (member (alist-get 'error reply) '("server_unavailable" "interface_unavailable")))
+        (if (alist-get 'error reply)
+            reply
+          (append reply `((server_selector . ,(or ch-agent-cli-selector :null)))))
+      (let ((servers (ch-agent-cli-loaded-servers)))
+        (append (if servers
+                    (cons `(message . ,(concat (alist-get 'message reply)
+                                               "; retry with --server set to an entry of loaded_servers"))
+                          (assq-delete-all 'message reply))
+                  reply)
+                `((loaded_servers . ,(vconcat servers))))))))
+
+(defun ch-agent-cli-run (args)
+  "Parse ARGS, perform the command, and return its reply."
+  (let (op id command directory display full select)
+    (while args
+      (let ((arg (pop args)))
+        (pcase arg
+          ((or "--help" "-h") (throw 'help t))
+          ((or "--server" "--command" "--directory")
+           (let ((value (pop args)))
+             (unless (and value (not (equal value "")))
+               (ch-agent-cli-fail "invalid_request" (concat arg " requires a nonempty value")))
+             (pcase arg
+               ("--server" (setq ch-agent-cli-selector value))
+               ("--command" (setq command value))
+               ("--directory" (setq directory value)))))
+          ("--display" (setq display t))
+          ("--full" (setq full t))
+          ("--select" (setq select t))
+          ((pred (string-prefix-p "--"))
+           (ch-agent-cli-fail "invalid_request" (concat "Unknown option: " arg)))
+          (_ (cond ((not op) (setq op arg))
+                   ((not id) (setq id arg))
+                   (t (ch-agent-cli-fail "invalid_request" "Unexpected positional argument")))))))
+    (pcase op
+      ((or "start" "run")
+       (unless (and command directory (not id) (not select) (not full))
+         (ch-agent-cli-fail "invalid_request"
+                            (concat op " requires --command and --directory; only --display is optional"))))
+      ((or "wait" "get" "show")
+       (unless (ch-agent-cli-valid-id-p id)
+         (ch-agent-cli-fail "invalid_request" "Expected a compilation history ID"))
+       (when (or command directory display)
+         (ch-agent-cli-fail "invalid_request" "Invalid options for this command"))
+       (when (and full (not (equal op "get")))
+         (ch-agent-cli-fail "invalid_request" "--full is only valid for get"))
+       (when (and select (not (equal op "show")))
+         (ch-agent-cli-fail "invalid_request" "--select is only valid for show")))
+      ("doctor"
+       (when (or id command directory display full select)
+         (ch-agent-cli-fail "invalid_request" "doctor only accepts --server")))
+      (_ (ch-agent-cli-fail "invalid_request" "Expected doctor, start, run, wait, get, or show")))
+    (pcase op
+      ("doctor" (ch-agent-cli-doctor))
+      ("start" (ch-agent-cli-request `(:op start :command ,command :directory ,directory
+                                           :display ,display)
+                                     nil))
+      ("run"
+       (let* ((started (ch-agent-cli-request `(:op start :command ,command :directory ,directory
+                                                   :display ,display)
+                                             nil))
+              (new-id (alist-get 'id started)))
+         (cond ((alist-get 'error started) started)
+               ((ch-agent-cli-valid-id-p new-id) (ch-agent-cli-wait new-id))
+               (t (ch-agent-cli-error "invalid_response" "Start returned an invalid ID")))))
+      ("wait" (ch-agent-cli-wait id))
+      ("get" (ch-agent-cli-request `(:op get :id ,id :full ,full) id))
+      ("show" (ch-agent-cli-request `(:op show :id ,id :select ,select) id)))))
+
+;; Without a UTF-8 locale Emacs leaves arguments as bytes, and prints
+;; to stdout in the locale's coding system.
+(let ((args (mapcar (lambda (arg)
+                      (if (multibyte-string-p arg) arg (decode-coding-string arg 'utf-8)))
+                    (cdr command-line-args-left)))
+      (coding-system-for-write 'utf-8))
+  (setq command-line-args-left nil)
+  (unless (json-available-p)
+    (princ "{\"protocol_version\":1,\"error\":\"dependency_unavailable\",\"message\":\"Emacs on PATH lacks JSON support\"}\n")
+    (kill-emacs 1))
+  (let* ((reply (catch 'help (catch 'reply (ch-agent-cli-run args))))
+         (json (and (consp reply)
+                    (json-serialize reply :null-object :null :false-object :false))))
+    (unless json
+      (princ (concat "Usage: compilation-history-agent [--server SOCKET] COMMAND [OPTIONS]\n"
+                     "  doctor\n  start|run --command STRING --directory DIRECTORY [--display]\n"
+                     "  wait ID\n  get ID [--full]\n  show ID [--select]\n"
+                     "An existing local Emacs server is required. Protocol errors exit nonzero;\n"
+                     "inspect state/exit_code for the compilation outcome.\n"))
+      (kill-emacs 0))
+    (princ (if (multibyte-string-p json) json (decode-coding-string json 'utf-8)))
+    (terpri)
+    (kill-emacs (if (alist-get 'error reply) 1 0))))
