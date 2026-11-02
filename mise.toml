@@ -2,8 +2,8 @@
 source = [".mise/tasks"]
 
 [tools]
-"nix:git" = { version = "latest", os = ["macos"] }
-"nix:bash" = { version = "latest", os = ["macos"] }
+"conda:git" = { version = "latest", os = ["macos"] }
+"conda:bash" = { version = "latest", os = ["macos"] }
 
 # [tools]
 # "aqua:cirruslabs/cirrus-cli" = "latest"
