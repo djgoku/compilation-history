@@ -58,6 +58,17 @@ jobs:
       run: emacs --batch --eval "(message (with-temp-buffer (emacs-build-description) (buffer-string)))"
     - run: mise run check
     continue-on-error: ${{ matrix.emacs_channel == 'master' }}
+  workflows:
+    name: Workflows match Pkl sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+      with:
+        install: false
+        cache: false
+    - run: mise run check-workflows
   release-dry-run:
     if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -79,6 +90,7 @@ jobs:
     needs:
     - check-linux
     - check-misemacs
+    - workflows
     concurrency:
       group: release
       cancel-in-progress: false

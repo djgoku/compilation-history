@@ -94,6 +94,17 @@ jobs {
     }
   }
 
+  ["workflows"] {
+    name = "Workflows match Pkl sources"
+    `runs-on` = "ubuntu-latest"
+    `timeout-minutes` = 10
+    steps {
+      new { uses = "actions/checkout@v7" }
+      setupMiseStep
+      new { run = "mise run check-workflows" }
+    }
+  }
+
   ["release-dry-run"] {
     `if` = "github.ref != 'refs/heads/main'"
     `runs-on` = "ubuntu-latest"
@@ -121,6 +132,7 @@ jobs {
     needs {
       "check-linux"
       "check-misemacs"
+      "workflows"
     }
     concurrency = new Concurrency {
       group = "release"
