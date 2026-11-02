@@ -156,6 +156,13 @@ marker. It never deletes evidence. No operator records are changed by a drive,
 because the server never opens the user's database or server socket. Run
 cleanup after every failed attempt too.
 
+## Agent skill evaluation
+
+Whether a real agent following `skills/compilation-history/SKILL.md` uses the
+CLI correctly is checked separately by `mise run check-agent-skill`
+(`tests/agent-skill/README.md`). Run it after changing the skill, the CLI, or
+the agent module.
+
 ## Gotchas
 
 - The helper scripts and recipes use `jq`, which comes from mise
