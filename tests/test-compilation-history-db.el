@@ -372,5 +372,22 @@
           (should (equal newest-first
                          (mapcar #'car (compilation-history--query-page-fts 10 0 term)))))))))
 
+(ert-deftest test-get-record-includes-duration ()
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((id "20260903T120000000080"))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record :record-id id :command "known command"))
+      (compilation-history--update-compilation-record id 7 "known output")
+      (pcase-let ((`(,row-id ,_ ,command ,_ ,_ ,end ,exit ,killed ,_ ,_ ,_ ,duration)
+                   (compilation-history--get-record id)))
+        (should (equal id row-id))
+        (should (equal "known command" command))
+        (should end)
+        (should (= 7 exit))
+        (should (= 0 killed))
+        (should (numberp duration))))
+    (should-not (compilation-history--get-record "20260903T120000000081"))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here

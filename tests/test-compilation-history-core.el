@@ -1115,6 +1115,40 @@ compile-command in the original buffer via setcar on compilation-arguments."
     (kill-buffer buffer)
     (should-not (compilation-history--finish-function buffer "finished\n"))))
 
+(ert-deftest core-final-save-hook-runs-after-finish-and-kill ()
+  "Final-save subscribers see the saved row, or the error when saving fails."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let* (calls
+           (compilation-history-final-save-functions
+            (list (lambda (id error)
+                    (push (list id error
+                                (compilation-history--with-db db
+                                  (car (sqlite-select
+                                        db "SELECT exit_code, killed FROM compilations WHERE id = ?"
+                                        (vector id)))))
+                          calls)))))
+      (with-temp-buffer
+        (insert "command\noutput\nfooter\n")
+        (setq-local compilation-history-record
+                    (compilation-history-test--make-record :record-id "20260903T120000000010"))
+        (setf (compilation-history-exit-code compilation-history-record) 7)
+        (compilation-history--insert-compilation-record compilation-history-record)
+        (cl-letf (((symbol-function 'compilation-history--update-compilation-record)
+                   (lambda (&rest _) (error "Fixture final write failure"))))
+          (should-error (compilation-history--finish-function (current-buffer) "exited abnormally\n")))
+        (should (equal "Fixture final write failure" (error-message-string (nth 1 (car calls)))))
+        (compilation-history--finish-function (current-buffer) "exited abnormally\n")
+        (should (equal '("20260903T120000000010" nil (7 0)) (car calls))))
+      (with-temp-buffer
+        (insert "running\n")
+        (setq-local compilation-history-record
+                    (compilation-history-test--make-record :record-id "20260903T120000000011"))
+        (compilation-history--insert-compilation-record compilation-history-record)
+        (compilation-history--kill-buffer-function)
+        (should (equal '("20260903T120000000011" nil (-1 1)) (car calls))))
+      (should (= 3 (length calls))))))
+
 (ert-deftest core-sentinel-without-buffer ()
   "A process without a buffer must not be dereferenced for metadata."
   (cl-letf (((symbol-function 'process-buffer) (lambda (_) nil))

@@ -39,6 +39,7 @@
 (require 'json)
 (require 'compile)
 (require 'subr-x)
+(require 'rx)
 
 ;;; Keymaps
 
@@ -94,6 +95,11 @@ If nil, do not switch (standard Emacs recompile behavior)."
   :group 'compilation-history)
 
 ;;; Buffer-local Variables
+
+(defvar compilation-history-final-save-functions nil
+  "Abnormal hook run in a compilation buffer after its final save attempt.
+Each function receives the record ID and the error that made the save
+fail, or nil when the record was saved.")
 
 (defvar-local compilation-history-record nil
   "The compilation-history record for this buffer.")
@@ -429,6 +435,15 @@ Each row includes a computed duration_seconds column appended at the end."
                          "SELECT output FROM compilations WHERE id = ?"
                          (vector id)))))
 
+(defun compilation-history--get-record (id)
+  "Return the page columns and duration_seconds for record ID, or nil."
+  (compilation-history--with-db db
+    (car (sqlite-select db
+                        (format "SELECT %s, %s FROM compilations WHERE id = ?"
+                                compilation-history--page-columns
+                                compilation-history--duration-expr)
+                        (vector id)))))
+
 (defconst compilation-history--fts-column-names
   '("compile_command" "default_directory" "git_branch" "output")
   "FTS-indexed column names for LIKE fallback.")
@@ -518,6 +533,16 @@ Adds recompile and quit bindings and sets the buffer read-only."
   (when compilation-history-buffer-mode
     (setq buffer-read-only t)))
 
+(defun compilation-history--save-final (record-id exit-code output killed)
+  "Save RECORD-ID's EXIT-CODE, OUTPUT and KILLED state as final.
+Then run `compilation-history-final-save-functions', including on failure."
+  (condition-case err
+      (compilation-history--update-compilation-record record-id exit-code output killed)
+    (error
+     (run-hook-with-args 'compilation-history-final-save-functions record-id err)
+     (signal (car err) (cdr err))))
+  (run-hook-with-args 'compilation-history-final-save-functions record-id nil))
+
 (defun compilation-history--finish-function (buffer status)
   "Handle compilation finish for BUFFER with STATUS."
   (when-let* ((record-id (and (buffer-live-p buffer)
@@ -543,7 +568,7 @@ Adds recompile and quit bindings and sets the buffer read-only."
                        (buffer-substring-no-properties (point-min) (point-max))))
              (killed (string-match-p (rx (or "killed" "interrupt")) status))
              (exit-code (compilation-history-exit-code (buffer-local-value 'compilation-history-record buffer))))
-        (compilation-history--update-compilation-record record-id exit-code output killed)
+        (compilation-history--save-final record-id exit-code output killed)
         (compilation-history-buffer-mode 1)))))
 
 (defun compilation-history--kill-buffer-function ()
@@ -559,7 +584,7 @@ Avoids marking a record as killed when it already exited successfully."
                           (concat compilation-history--header
                                   compilation-history--raw-output)
                         (buffer-substring-no-properties (point-min) (point-max)))))
-          (compilation-history--update-compilation-record record-id -1 output t))))))
+          (compilation-history--save-final record-id -1 output t))))))
 
 (defun compilation-history--add-sentinel-metadata-advice (proc msg)
   "Record exit metadata from PROC and MSG when its history buffer is live."
