@@ -579,6 +579,11 @@ When called from a mouse EVENT, move point to the click position first."
           (mapcar (lambda (col) (concat col ":"))
                   compilation-history--fts-column-names))))
 
+(defvar-keymap compilation-history-view-search-map
+  :doc "Keymap for the history search prompt."
+  :parent minibuffer-local-map
+  "TAB" #'completion-at-point)
+
 (defun compilation-history-view-search ()
   "Search compilation history using FTS.
 Supports substring matching and column-specific searches
@@ -592,7 +597,8 @@ Empty input clears the search."
                 (read-from-minibuffer
                  (if compilation-history-view--search-term
                      (format "Search (current: %s): " compilation-history-view--search-term)
-                   "Search: ")))))
+                   "Search: ")
+                 nil compilation-history-view-search-map))))
     (setq compilation-history-view--search-term
           (if (string-empty-p term) nil term))
     ;; Reset to page 1 on new search

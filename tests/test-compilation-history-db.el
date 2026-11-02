@@ -353,5 +353,24 @@
       (let ((output (compilation-history--get-output "20260321T120000000001")))
         (should (string-match-p "\033\\[32m" output))))))
 
+(ert-deftest test-compilation-history--same-second-records-newest-first ()
+  "Records that start in the same second list newest first on every page query."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((ids '("20261102T120000000001" "20261102T120000000002" "20261102T120000000003")))
+      (dolist (id ids)
+        (compilation-history--insert-compilation-record
+         (compilation-history-test--make-record
+          :record-id id
+          :command "aws s3 ls s3://bucket")))
+      (compilation-history--with-db db
+        (sqlite-execute db "UPDATE compilations SET start_time = '2026-11-02 12:00:00'"))
+      (let ((newest-first (reverse ids)))
+        (should (equal newest-first
+                       (mapcar #'car (compilation-history--query-page 10 0))))
+        (dolist (term '("aws s3" "s3" "s3://"))
+          (should (equal newest-first
+                         (mapcar #'car (compilation-history--query-page-fts 10 0 term)))))))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here
