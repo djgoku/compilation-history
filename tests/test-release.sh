@@ -219,13 +219,14 @@ test_missing_gh_aborts() {
   local tmpdir="$1"
   cd "$tmpdir"
   git commit -q --allow-empty -m "feat: something"
-  # Use a restricted PATH that excludes gh, but still has git and bash
-  local git_dir bash_dir
-  git_dir="$(dirname "$(command -v git)")"
-  bash_dir="$(dirname "$(command -v bash)")"
-  local output
-  output=$(PATH="${git_dir}:${bash_dir}:/usr/bin:/bin" MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check 2>&1) && return 1
-  echo "$output" | grep -qi "gh"
+  # CI runners ship gh in /usr/bin, so the PATH holds only bash and git.
+  local bin output status=0
+  bin=$(mktemp -d)
+  ln -s "$(command -v bash)" "$bin/bash"
+  ln -s "$(command -v git)" "$bin/git"
+  output=$(PATH="$bin" MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check 2>&1) || status=$?
+  rm -rf "$bin"
+  [ "$status" -ne 0 ] && echo "$output" | grep -q "gh CLI not found"
 }
 
 test_dry_run_no_side_effects() {
