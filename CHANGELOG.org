@@ -1,5 +1,11 @@
 #+TITLE: Changelog
 
+* [0.2.9] - 2026-11-02
+** Fixed
+- guard finish and sentinel handlers against dead buffers
+** Other
+- keep fixture repos independent of commit signing
+
 * [0.2.8] - 2026-11-02
 ** Fixed
 - exit 0 from the release task when there is nothing to release
