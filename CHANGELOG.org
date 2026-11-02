@@ -1,5 +1,10 @@
 #+TITLE: Changelog
 
+* [0.2.10] - 2026-11-02
+** Fixed
+- list records that start in the same second newest first
+- complete column names with TAB in the history search prompt
+
 * [0.2.9] - 2026-11-02
 ** Fixed
 - guard finish and sentinel handlers against dead buffers
