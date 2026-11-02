@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#MISE description="Run all MELPA readiness checks (melpa-check, tests)"
+#MISE description="Run all MELPA readiness checks, tests, and agent integration tests"
 #MISE depends=["clean"]
 set -euo pipefail
 
 # Run after clean, not as sibling depends: byte-compile loads any .elc it
 # finds, and a stale one fails the build with the old function signatures.
-mise run melpa-check ::: test
+mise run melpa-check ::: test ::: test-agent
 
 echo ""
 echo "All MELPA readiness checks passed!"

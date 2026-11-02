@@ -22,8 +22,8 @@ run_test() {
   git config commit.gpgsign false
   git config tag.gpgsign false
 
-  # Create the two .el files
-  for f in compilation-history.el compilation-history-view.el; do
+  # Create every released .el module.
+  for f in compilation-history.el compilation-history-view.el compilation-history-agent.el; do
     cat > "$f" <<'ELEOF'
 ;;; dummy.el --- Test -*- lexical-binding: t; -*-
 ;; Version: 0.1.0
@@ -270,7 +270,7 @@ test_end_to_end_local() {
   MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --local-only --no-branch-check
 
   # Verify version updated in all .el files
-  for f in compilation-history.el compilation-history-view.el; do
+  for f in compilation-history.el compilation-history-view.el compilation-history-agent.el; do
     grep -q '^;; Version: 0.1.1' "$tmpdir/$f" || { echo "$f version not updated"; return 1; }
   done
 
@@ -314,7 +314,7 @@ test_multi_release() {
   [ "$second_pos" -lt "$first_pos" ] || { echo "Second release not prepended before first"; return 1; }
 
   # Verify .el versions updated to latest
-  for f in compilation-history.el compilation-history-view.el; do
+  for f in compilation-history.el compilation-history-view.el compilation-history-agent.el; do
     grep -q '^;; Version: 0.1.2' "$tmpdir/$f" || { echo "$f not at 0.1.2"; return 1; }
   done
 }
@@ -384,11 +384,11 @@ test_remote_release_publishes_api_commit() {
   [ "$(git rev-parse HEAD)" = "$head" ] || { echo "local HEAD not reset to the API commit"; return 1; }
   [ "$(git -C "$FAKE_ORIGIN" rev-parse v0.1.1^{commit})" = "$head" ] || return 1
   grep -q -- "--target $head" "$FAKE_GH_LOG.release" || return 1
-  for f in compilation-history.el compilation-history-view.el; do
+  for f in compilation-history.el compilation-history-view.el compilation-history-agent.el; do
     git -C "$FAKE_ORIGIN" show "$branch:$f" | grep -q '^;; Version: 0.1.1' || { echo "$f not published at 0.1.1"; return 1; }
   done
   jq -e '.variables.input.fileChanges.additions | map(.path) | sort ==
-    ["CHANGELOG.org","compilation-history-view.el","compilation-history.el"]' \
+    ["CHANGELOG.org","compilation-history-agent.el","compilation-history-view.el","compilation-history.el"]' \
     "$FAKE_GH_LOG.payload" > /dev/null
 }
 

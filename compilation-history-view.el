@@ -496,6 +496,9 @@ Reuses existing buffer if still alive, otherwise creates from database."
                          :command cmd
                          :buffer-name buf-name
                          :compile-directory dir
+                         :exit-code (plist-get record :exit-code)
+                         :message (when (equal (plist-get record :status) "killed")
+                                    "killed")
                          :comint comint-flag))
             (compilation-history-buffer-mode 1))
           buf))))

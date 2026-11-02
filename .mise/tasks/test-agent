@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Test the agent CLI and isolated Emacs server integration"
+set -euo pipefail
+PROJECT="${MISE_PROJECT_DIR:-.}"
+bash "$PROJECT/tests/test-compilation-history-agent-cli.sh"
+bash "$PROJECT/tests/test-compilation-history-agent-server.sh"
