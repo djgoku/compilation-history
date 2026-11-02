@@ -38,6 +38,130 @@ To disable:
 (compilation-history-mode -1)
 #+end_src
 
+* Optional local agent interface
+
+Agents and shell scripts can start ordinary tracked compilations in an existing
+Emacs server, then wait for completion without polling SQLite or blocking the
+Emacs event loop. This interface is independent of =emacs-mcp-server=.
+
+** Setup
+
+The optional interface requires a local Unix-socket-capable Emacs and an
+=emacs= on the agent's =PATH= with JSON support (always present from Emacs 30;
+Emacs 29 needs a build with JSON). The CLI is an Emacs Lisp script that runs
+=emacs -Q --script= and needs nothing else. Windows and remote TRAMP builds are
+not supported by this interface.
+
+Load the module in the Emacs server you already use:
+
+#+begin_src elisp
+(require 'compilation-history)
+(compilation-history-mode 1)
+(require 'compilation-history-agent)
+(compilation-history-agent-mode 1)
+#+end_src
+
+Place the repository's executable =bin/compilation-history-agent= on =PATH= (or
+call it by its full path). The CLI is a repository artifact; installing the Emacs
+package alone does not install a shell executable. Neither doctor nor any other
+CLI command loads modules, enables modes, starts Emacs, or falls back to another
+server/backend. Start/configure your Emacs server yourself before using it.
+
+#+begin_src sh
+compilation-history-agent doctor
+compilation-history-agent run --directory "$PWD" --command "make test"
+compilation-history-agent start --directory "$PWD" --command "make test"
+compilation-history-agent wait COMPILATION_ID
+compilation-history-agent get COMPILATION_ID --full
+#+end_src
+
+Server selection is =--server SOCKET= first, then
+=COMPILATION_HISTORY_AGENT_SERVER=, then =EMACS_SOCKET_NAME=, otherwise the
+default =server= socket. =--server= accepts a socket name or socket path, as
+emacsclient does, and may appear before or after the subcommand. The CLI never
+starts Emacs. Doctor reports =server_selector= (null when neither of the first
+two was given) and the connected Emacs's =server_name=. When the selected server
+is missing or lacks the module, doctor lists the sibling servers that have it in
+=loaded_servers=.
+It does not use the current shell's environment for the build:
+commands run with the selected Emacs server's environment and the supplied local
+directory. Database writes use that server's =compilation-history-db-file=;
+the interface never overrides it.
+
+** Commands and completion
+
+| Command | Purpose |
+|---------+---------|
+| =doctor= | Report enabled modes, wait socket, database path, and selected server name; no SQL reads |
+| =start --command STRING --directory DIR [--display]= | Start once and return the history ID immediately |
+| =wait ID= | Receive a retained result or block on one socket connection until the job finishes |
+| =run --command STRING --directory DIR [--display]= | Start then wait; print only the final result |
+| =get ID [--full]= | Read persisted history with one core-owned SQL query, even with agent mode off |
+| =show ID [--select]= | Display a still-live compilation buffer on the selected frame; no SQL reads |
+
+Every response is one versioned JSON object (except =--help=). Exit status zero
+means successful protocol delivery, *not* necessarily a successful build. Inspect
+=state= (=running=, =succeeded=, =failed=, or =killed=) and =exit_code=. Protocol
+and transport errors exit nonzero and may include a =get ID= recovery instruction.
+Never retry a start merely because display failed: its error includes the ID of
+the compilation that was already started.
+
+Enabling the interface opens one Unix socket under a randomly named 0700
+directory beneath Emacs's =temporary-file-directory=; =wait= blocks there while
+other commands go through the Emacs server. Running jobs do not expire. Completed
+results remain repeatably available for
+=compilation-history-agent-retention-seconds= (default 3600), measured from
+completion, not collection. Multiple clients may wait for the same job. Closing
+a client, expiring a result, or disabling the interface does not cancel a build
+or remove its ordinary history record/buffer. After expiry, disable, or server
+disconnect, use =get= as a recovery attempt; a failed persistence write or crash
+may leave only earlier incremental output. Very long temporary-directory paths
+can exceed the operating system's Unix-socket path limit, so enabling the mode
+fails.
+
+Wait results have the same shape as =get=: the final 4096 Unicode characters
+of persisted output plus a =tail_truncated= flag. =--full= substitutes =output=
+for the tail fields. Persisted output can contain raw ANSI escapes and differs
+from the displayed buffer. Emacs hands full output to the CLI through a private
+temporary file, because Emacs sends large strings to clients slowly.
+
+The interface reports completion after core history saves the final record,
+through =compilation-history-final-save-functions=, so finish hooks may close a
+completed buffer without changing the result. If that final save fails, waiters
+receive =completion_unavailable= with =get ID= recovery guidance. The persisted
+record may still be =running= with partial output; this is not confirmation of
+the build's final outcome.
+
+** Working alongside an agent
+
+#+begin_src sh
+compilation-history-agent run --directory "$PWD" --command "make test" --display
+compilation-history-agent show COMPILATION_ID
+compilation-history-agent show COMPILATION_ID --select
+#+end_src
+
+Normal starts do not show or select a window. =--display= and =show= display on
+the selected Emacs frame without selecting the compilation window; =--select=
+explicitly selects it there. None raises a frame or requests operating-system
+focus. Constraints such as an unsplittable frame can return =display_unavailable=.
+Start/wait/show report a fresh =display= snapshot: =visible= means shown on a
+visible frame and =selected= means the globally selected Emacs window. Selected
+does not imply operating-system focus.
+
+You can interrupt or kill a compilation using Emacs's normal interactive UI.
+Do not ask a remote agent to evaluate raw =kill-buffer= against a running process:
+Emacs may wait for a confirmation prompt and block server requests. This release
+has no cancellation command, automatic fallback, or MCP server.
+
+** Agent skill
+
+The repository includes a portable [[file:skills/compilation-history/SKILL.md][compilation-history skill]] for this CLI.
+It teaches agents to retain IDs, wait without status polling, recover persisted
+results, and display buffers only when requested. See [[file:docs/agent-integrations.md][agent integration setup]]
+for Codex, Claude Code, Kiro, Gemini CLI, and ChatGPT environment guidance.
+Install/discover the skill separately from the Emacs package and CLI. A skill
+does not grant a hosted agent access to your local Emacs server.
+
 * Recommended Setup
 
 A complete compilation stack using =use-package=. These three blocks work together but are independent — adopt all three or pick what you need.
