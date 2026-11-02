@@ -9,7 +9,7 @@ jq = "1.8.2"
 "conda:git" = { version = "latest", os = ["macos"] }
 "conda:bash" = { version = "latest", os = ["macos"] }
 
-[tasks.gen-workflows]
+[tasks.generate-workflows]
 description = 'Regenerates GitHub Actions YAML (SHA-pinned via DependabotManagedActions) from the Pkl sources'
 tools = { pkl = "latest" }
 run = "pkl eval --project-dir .github/ -m .github/ .github/index.pkl"
@@ -25,11 +25,11 @@ description = 'Fails if the committed workflow YAML differs from what the Pkl so
 run = '''
 # --force: the sources/outputs mtime check skips regeneration after a hand
 # edit to the YAML, which would let this check pass on a stale file.
-mise run --force gen-workflows
+mise run --force generate-workflows
 if [ -n "$(git status --porcelain -- .github)" ]; then
   git status --short -- .github
   git diff -- .github
-  echo "check-workflows: generated YAML is stale; run 'mise run gen-workflows' and commit" >&2
+  echo "check-workflows: generated YAML is stale; run 'mise run generate-workflows' and commit" >&2
   exit 1
 fi
 '''
