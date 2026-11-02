@@ -3,3 +3,4 @@ old-files
 notes.org
 .worktrees
 .lint-deps
+.verify/
