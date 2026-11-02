@@ -101,11 +101,13 @@ BREAKING CHANGE: the function signature changed"
 test_no_bumpable_commits() {
   local tmpdir="$1"
   cd "$tmpdir"
-  # No new commits since initial — tag the initial commit
   git tag v0.1.0
-  local output
-  output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --dry-run --no-branch-check 2>&1) && return 1
-  echo "$output" | grep -qi "no.*commits\|nothing.*release"
+  local head_before output
+  head_before=$(git rev-parse HEAD)
+  output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --local-only --no-branch-check 2>&1) || return 1
+  echo "$output" | grep -q "nothing to release" || return 1
+  [ "$(git rev-parse HEAD)" = "$head_before" ] || return 1
+  [ "$(git tag -l)" = "v0.1.0" ]
 }
 
 run_test "version parsing and feat bump" test_version_parsing
@@ -113,7 +115,7 @@ run_test "fix only → patch bump" test_fix_only_patch_bump
 run_test "feat → patch bump" test_feat_patch_bump
 run_test "feat! → minor bump" test_breaking_minor_bump
 run_test "BREAKING CHANGE in body → minor bump" test_breaking_body_minor_bump
-run_test "no bumpable commits → error" test_no_bumpable_commits
+run_test "no bumpable commits → no-op success" test_no_bumpable_commits
 
 test_changelog_grouping() {
   local tmpdir="$1"
@@ -217,13 +219,14 @@ test_missing_gh_aborts() {
   local tmpdir="$1"
   cd "$tmpdir"
   git commit -q --allow-empty -m "feat: something"
-  # Use a restricted PATH that excludes gh, but still has git and bash
-  local git_dir bash_dir
-  git_dir="$(dirname "$(command -v git)")"
-  bash_dir="$(dirname "$(command -v bash)")"
-  local output
-  output=$(PATH="${git_dir}:${bash_dir}:/usr/bin:/bin" MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check 2>&1) && return 1
-  echo "$output" | grep -qi "gh"
+  # CI runners ship gh in /usr/bin, so the PATH holds only bash and git.
+  local bin output status=0
+  bin=$(mktemp -d)
+  ln -s "$(command -v bash)" "$bin/bash"
+  ln -s "$(command -v git)" "$bin/git"
+  output=$(PATH="$bin" MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check 2>&1) || status=$?
+  rm -rf "$bin"
+  [ "$status" -ne 0 ] && echo "$output" | grep -q "gh CLI not found"
 }
 
 test_dry_run_no_side_effects() {

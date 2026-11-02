@@ -229,8 +229,8 @@ last_tag=$(get_last_tag)
 bump_type=$(compute_bump "$last_tag")
 
 if [ "$bump_type" = "none" ]; then
-  echo "Error: no releasable commits found since ${last_tag:-beginning}" >&2
-  exit 1
+  echo "No releasable commits since ${last_tag:-beginning}; nothing to release"
+  exit 0
 fi
 
 new_version=$(bump_version "$current_version" "$bump_type")

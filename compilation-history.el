@@ -623,7 +623,7 @@ Runs on `compilation-filter-hook' at depth -90, before
                 (buffer-substring-no-properties compilation-filter-start (point)))))
 
 (defun compilation-history--comint-capture-raw-output (string)
-  "Capture raw comint output before ANSI filtering.
+  "Capture raw comint output STRING before ANSI filtering.
 Intended for `comint-preoutput-filter-functions'."
   (setq compilation-history--raw-output
         (concat compilation-history--raw-output string))
