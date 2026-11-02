@@ -1062,5 +1062,61 @@ compile-command in the original buffer via setcar on compilation-arguments."
                                    comint-preoutput-filter-functions))))
         (kill-buffer buffer)))))
 
+(ert-deftest core-killed-status-is-persisted ()
+  "Killed and interrupted finishes must set the persisted killed flag."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (cl-loop for status in '("killed\n" "interrupt\n")
+             for id in '("20260903T120000000001" "20260903T120000000002")
+             do
+             (with-temp-buffer
+               (insert "command\noutput\nfooter\n")
+               (setq-local compilation-history-record
+                           (compilation-history-test--make-record :record-id id))
+               (setf (compilation-history-exit-code compilation-history-record) 9)
+               (compilation-history--insert-compilation-record compilation-history-record)
+               (compilation-history--finish-function (current-buffer) status)
+               (compilation-history--with-db db
+                 (should (equal '(9 1)
+                                (car (sqlite-select
+                                      db "SELECT exit_code, killed FROM compilations WHERE id = ?"
+                                      (vector id))))))))))
+
+(ert-deftest core-finish-after-buffer-killed ()
+  "An earlier finish hook that kills the buffer must not break ours."
+  (let ((buffer (generate-new-buffer " *core-finish-dead*")))
+    (with-current-buffer buffer
+      (setq-local compilation-history-record
+                  (compilation-history-test--make-record :record-id "20260903T120000000003")))
+    (kill-buffer buffer)
+    (should-not (compilation-history--finish-function buffer "finished\n"))))
+
+(ert-deftest core-sentinel-without-buffer ()
+  "A process without a buffer must not be dereferenced for metadata."
+  (cl-letf (((symbol-function 'process-buffer) (lambda (_) nil))
+            ((symbol-function 'process-exit-status)
+             (lambda (_) (ert-fail "Missing record must not be inspected"))))
+    (should-not (compilation-history--add-sentinel-metadata-advice 'fixture "killed\n"))))
+
+(ert-deftest core-sentinel-with-dead-buffer ()
+  "A killed process buffer must not be selected by metadata advice."
+  (let ((buffer (generate-new-buffer " *core-sentinel-dead*")))
+    (kill-buffer buffer)
+    (cl-letf (((symbol-function 'process-buffer) (lambda (_) buffer))
+              ((symbol-function 'process-exit-status)
+               (lambda (_) (ert-fail "Dead record must not be inspected"))))
+      (should-not (compilation-history--add-sentinel-metadata-advice 'fixture "killed\n")))))
+
+(ert-deftest core-sentinel-without-valid-record ()
+  "Ordinary buffers without a history record must be left alone."
+  (with-temp-buffer
+    (let ((buffer (current-buffer)))
+      (dolist (record '(nil unrelated-record))
+        (setq-local compilation-history-record record)
+        (cl-letf (((symbol-function 'process-buffer) (lambda (_) buffer))
+                  ((symbol-function 'process-exit-status)
+                   (lambda (_) (ert-fail "Invalid record must not be inspected"))))
+          (should-not (compilation-history--add-sentinel-metadata-advice 'fixture "finished\n")))))))
+
 (provide 'test-compilation-history-core)
 ;;; test-compilation-history-core.el ends here
