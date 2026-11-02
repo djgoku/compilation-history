@@ -35,7 +35,7 @@ Variables available in BODY: temp-dir, temp-db."
      (call-process "git" nil nil nil "-C" temp-dir "init" "-b" "test-branch")
      (call-process "git" nil nil nil "-C" temp-dir "config" "user.email" "test@test")
      (call-process "git" nil nil nil "-C" temp-dir "config" "user.name" "Test")
-     (call-process "git" nil nil nil "-C" temp-dir "commit" "--allow-empty" "-m" "init")
+     (call-process "git" nil nil nil "-C" temp-dir "-c" "commit.gpgsign=false" "commit" "--allow-empty" "-m" "init")
      (unwind-protect
          (progn ,@body)
        (when (file-directory-p temp-dir)
