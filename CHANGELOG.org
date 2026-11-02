@@ -1,5 +1,16 @@
 #+TITLE: Changelog
 
+* [0.2.8] - 2026-11-02
+** Fixed
+- exit 0 from the release task when there is nothing to release
+- declare Emacs 29.1 in compilation-history-view.el Package-Requires
+- mention STRING argument in comint capture docstring
+** Other
+- fail when generated workflow YAML differs from the Pkl sources
+- replace Cirrus CI and melpazoid with Pkl-generated GitHub Actions
+- hide gh from the missing-gh release test with a bash-and-git PATH
+- install macOS dev git and bash through conda, not nix
+
 * [0.2.7] - 2026-04-13
 ** Fixed
 - clean up comint preoutput hook on finish and buffer kill
