@@ -101,11 +101,13 @@ BREAKING CHANGE: the function signature changed"
 test_no_bumpable_commits() {
   local tmpdir="$1"
   cd "$tmpdir"
-  # No new commits since initial — tag the initial commit
   git tag v0.1.0
-  local output
-  output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --dry-run --no-branch-check 2>&1) && return 1
-  echo "$output" | grep -qi "no.*commits\|nothing.*release"
+  local head_before output
+  head_before=$(git rev-parse HEAD)
+  output=$(MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --local-only --no-branch-check 2>&1) || return 1
+  echo "$output" | grep -q "nothing to release" || return 1
+  [ "$(git rev-parse HEAD)" = "$head_before" ] || return 1
+  [ "$(git tag -l)" = "v0.1.0" ]
 }
 
 run_test "version parsing and feat bump" test_version_parsing
@@ -113,7 +115,7 @@ run_test "fix only → patch bump" test_fix_only_patch_bump
 run_test "feat → patch bump" test_feat_patch_bump
 run_test "feat! → minor bump" test_breaking_minor_bump
 run_test "BREAKING CHANGE in body → minor bump" test_breaking_body_minor_bump
-run_test "no bumpable commits → error" test_no_bumpable_commits
+run_test "no bumpable commits → no-op success" test_no_bumpable_commits
 
 test_changelog_grouping() {
   local tmpdir="$1"
