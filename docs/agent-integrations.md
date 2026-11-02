@@ -109,5 +109,8 @@ of completion. Request `get ID --full` only when earlier output matters.
 
 ## Validation scope
 
-The CLI and isolated-server tests cover the protocol and three-job concurrency. Native discovery and end-to-end
+The CLI and isolated-server tests cover the protocol and three-job concurrency.
+`mise run check-agent-skill` runs a real agent with only the skill and the CLI
+through build, concurrency and recovery scenarios and scores its CLI calls; see
+[tests/agent-skill](../tests/agent-skill/README.md). It covers Claude Code today. Native discovery and end-to-end
 execution in every listed product remain separate compatibility checks.

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Evaluate the compilation-history agent skill end to end with a real agent (needs an authenticated agent CLI; costs model calls)"
+set -euo pipefail
+exec "${MISE_PROJECT_DIR:-.}/tests/agent-skill/run.sh" "$@"
