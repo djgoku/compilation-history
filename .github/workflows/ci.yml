@@ -1,0 +1,103 @@
+# Generated from Workflow.pkl. DO NOT EDIT.
+name: ci
+'on':
+  pull_request: {}
+  push:
+    branches:
+    - main
+  workflow_dispatch: {}
+env:
+  MISE_YES: '1'
+  MISE_EXPERIMENTAL: 'true'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+jobs:
+  check-linux:
+    name: Check (Emacs ${{ matrix.emacs_version }})
+    strategy:
+      matrix:
+        emacs_version:
+        - '29.1'
+        - '30.1'
+      fail-fast: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - name: Install mise
+      run: |-
+        curl -fsSL https://mise.run | sh
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - name: Show Emacs build info
+      run: emacs --batch --eval "(message (with-temp-buffer (emacs-build-description) (buffer-string)))"
+    - run: mise run check
+    container: silex/emacs:${{ matrix.emacs_version }}-ci
+  check-misemacs:
+    name: Check (misemacs emacs-${{ matrix.emacs_channel }})
+    strategy:
+      matrix:
+        emacs_channel:
+        - '30'
+        - '31'
+        - master
+      fail-fast: false
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      MISE_DISABLE_TOOLS: conda:git,conda:bash
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+    - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+      with:
+        install: false
+        cache: false
+    - name: Install Emacs
+      run: mise use -g packslip:github.com/djgoku/misemacs-emacs-${{ matrix.emacs_channel }}@latest
+    - name: Show Emacs build info
+      run: emacs --batch --eval "(message (with-temp-buffer (emacs-build-description) (buffer-string)))"
+    - run: mise run check
+    continue-on-error: ${{ matrix.emacs_channel == 'master' }}
+  release-dry-run:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        fetch-depth: 0
+    - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+      with:
+        install: false
+        cache: false
+    - run: mise run release -- --dry-run --no-branch-check
+    - run: mise run release-test
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs:
+    - check-linux
+    - check-misemacs
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        fetch-depth: 0
+    - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+      with:
+        install: false
+        cache: false
+    - name: Release
+      run: |-
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        mise run release

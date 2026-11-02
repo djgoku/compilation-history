@@ -1,9 +1,19 @@
-[tasks]
-source = [".mise/tasks"]
+[task_config]
+includes = [
+  ".mise/tasks",
+  "git::https://github.com/djgoku/mise-melpa-checks.git//tasks?ref=v0.0.1",
+]
 
 [tools]
 "conda:git" = { version = "latest", os = ["macos"] }
 "conda:bash" = { version = "latest", os = ["macos"] }
 
-# [tools]
-# "aqua:cirruslabs/cirrus-cli" = "latest"
+[tasks.gen-workflows]
+description = 'Regenerates GitHub Actions YAML (SHA-pinned via DependabotManagedActions) from the Pkl sources'
+run = "pkl eval --project-dir .github/ -m .github/ .github/index.pkl"
+sources = ['.github/index.pkl', '.github/workflows/*.pkl', '.github/PklProject*']
+outputs = [
+  '.github/workflows/ci.yml',
+  '.github/workflows/__lockfile__.yml',
+  '.github/dependabot.yml',
+]

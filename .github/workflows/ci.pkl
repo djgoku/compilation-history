@@ -1,0 +1,153 @@
+amends "@com.github.actions/Workflow.pkl"
+
+name = "ci"
+
+on {
+  workflow_dispatch = new {}
+  pull_request = new {}
+  push = new {
+    branches { "main" }
+  }
+}
+
+// On main every run gets its own group, so a newer push never cancels a
+// release in flight. Other refs cancel superseded runs.
+concurrency {
+  group = "\(module.context.github.workflow)-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}"
+  `cancel-in-progress` = true
+}
+
+env {
+  ["MISE_YES"] = "1"
+  // Remote git task includes (mise-melpa-checks) are a mise experimental feature.
+  ["MISE_EXPERIMENTAL"] = "true"
+}
+
+local packageRequiresEmacs = "29.1"
+
+local installMiseStep: Step = new {
+  name = "Install mise"
+  run = """
+    curl -fsSL https://mise.run | sh
+    echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    """
+}
+
+local setupMiseStep: Step = new {
+  uses = "jdx/mise-action@v4"
+  with {
+    ["install"] = false
+    ["cache"] = false
+  }
+}
+
+local showEmacsBuildStep: Step = new {
+  name = "Show Emacs build info"
+  run = "emacs --batch --eval \"(message (with-temp-buffer (emacs-build-description) (buffer-string)))\""
+}
+
+jobs {
+  ["check-linux"] {
+    name = "Check (Emacs ${{ matrix.emacs_version }})"
+    `runs-on` = "ubuntu-latest"
+    `timeout-minutes` = 30
+    strategy {
+      `fail-fast` = false
+      matrix {
+        ["emacs_version"] { packageRequiresEmacs; "30.1" }
+      }
+    }
+    container = "silex/emacs:${{ matrix.emacs_version }}-ci"
+    steps {
+      new { uses = "actions/checkout@v7" }
+      installMiseStep
+      showEmacsBuildStep
+      new { run = "mise run check" }
+    }
+  }
+
+  ["check-misemacs"] {
+    name = "Check (misemacs emacs-${{ matrix.emacs_channel }})"
+    `runs-on` = "macos-26"
+    `timeout-minutes` = 30
+    `continue-on-error` = "${{ matrix.emacs_channel == 'master' }}"
+    strategy {
+      `fail-fast` = false
+      matrix {
+        ["emacs_channel"] { "30"; "31"; "master" }
+      }
+    }
+    env {
+      ["MISE_DISABLE_TOOLS"] = "conda:git,conda:bash"
+    }
+    steps {
+      new { uses = "actions/checkout@v7" }
+      setupMiseStep
+      // A `mise run` inside `mise x` drops the tools `mise x` added, so the
+      // build becomes a global tool on the runner instead.
+      new {
+        name = "Install Emacs"
+        run = "mise use -g packslip:github.com/djgoku/misemacs-emacs-${{ matrix.emacs_channel }}@latest"
+      }
+      showEmacsBuildStep
+      new { run = "mise run check" }
+    }
+  }
+
+  ["release-dry-run"] {
+    `if` = "github.ref != 'refs/heads/main'"
+    `runs-on` = "ubuntu-latest"
+    `timeout-minutes` = 15
+    env {
+      ["GITHUB_TOKEN"] = "${{ secrets.GITHUB_TOKEN }}"
+    }
+    steps {
+      new {
+        uses = "actions/checkout@v7"
+        with {
+          ["fetch-depth"] = 0
+        }
+      }
+      setupMiseStep
+      new { run = "mise run release -- --dry-run --no-branch-check" }
+      new { run = "mise run release-test" }
+    }
+  }
+
+  ["release"] {
+    `if` = "github.ref == 'refs/heads/main' && github.event_name == 'push'"
+    `runs-on` = "ubuntu-latest"
+    `timeout-minutes` = 15
+    needs {
+      "check-linux"
+      "check-misemacs"
+    }
+    concurrency = new Concurrency {
+      group = "release"
+      `cancel-in-progress` = false
+    }
+    permissions {
+      contents = "write"
+    }
+    env {
+      ["GITHUB_TOKEN"] = "${{ secrets.GITHUB_TOKEN }}"
+    }
+    steps {
+      new {
+        uses = "actions/checkout@v7"
+        with {
+          ["fetch-depth"] = 0
+        }
+      }
+      setupMiseStep
+      new {
+        name = "Release"
+        run = """
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mise run release
+          """
+      }
+    }
+  }
+}

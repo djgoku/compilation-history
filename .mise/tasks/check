@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Run all MELPA readiness checks (melpazoid, tests)"
-#MISE depends=["melpazoid", "test"]
+#MISE description="Run all MELPA readiness checks (melpa-check, tests)"
+#MISE depends=["melpa-check", "test"]
 set -euo pipefail
 
 echo ""
