@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Drive compilation-history end to end in a disposable Emacs. Terminal Emacs under tmux covers the user's side (M-x compile tracking, the history view, search, recompile); the agent CLI (bin/compilation-history-agent) covers start, wait, run, get, show and doctor. Use after changing any compilation-history*.el file or the CLI, and before claiming a change works.
+description: Drive compilation-history end to end in a disposable Emacs. Terminal Emacs under tmux covers the user's side (M-x compile tracking, the history view, search, recompile); the agent CLI (bin/compilation-history-agent) covers start, wait, run, get, list, show and doctor. Use after changing any compilation-history*.el file or the CLI, and before claiming a change works.
 ---
 
 # Verify compilation-history
@@ -12,7 +12,8 @@ compilation-history has two user surfaces:
   recompiles entries. It works in terminal and graphical Emacs; this skill
   drives real keystrokes in `emacs -nw` under a private tmux server.
 - **Agent CLI.** A coding agent runs `bin/compilation-history-agent` in a shell
-  to start compilations, block until they finish, and recover persisted output.
+  to start compilations, block until they finish, recover persisted output,
+  and find earlier compilations.
 
 Every drive runs against a **disposable Emacs** with its own history database
 and server socket. Never point this skill at the user's personal Emacs, their
@@ -101,6 +102,7 @@ $S/cli.sh start --directory "$VERIFY_ROOT" --command 'sleep 2; exit 3'
 $S/cli.sh wait ID
 $S/cli.sh get ID [--full]
 $S/cli.sh show ID [--select]
+$S/cli.sh list [--search TEXT] [--limit N] [--offset N]
 $S/observe.sh '(buffer-name (window-buffer (selected-window)))'
 ```
 
