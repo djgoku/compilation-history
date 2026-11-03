@@ -112,19 +112,26 @@ ID is the compilation whose `get' recovers from a failure."
 
 (defun ch-agent-cli-run (args)
   "Parse ARGS, perform the command, and return its reply."
-  (let (op id command directory display full select)
+  (let (op id command directory display full select search limit offset)
     (while args
       (let ((arg (pop args)))
         (pcase arg
           ((or "--help" "-h") (throw 'help t))
-          ((or "--server" "--command" "--directory")
+          ((or "--server" "--command" "--directory" "--search" "--limit" "--offset")
            (let ((value (pop args)))
              (unless (and value (not (equal value "")))
                (ch-agent-cli-fail "invalid_request" (concat arg " requires a nonempty value")))
              (pcase arg
                ("--server" (setq ch-agent-cli-selector value))
                ("--command" (setq command value))
-               ("--directory" (setq directory value)))))
+               ("--directory" (setq directory value))
+               ("--search" (setq search value))
+               ((or "--limit" "--offset")
+                (unless (string-match-p "\\`[0-9]+\\'" value)
+                  (ch-agent-cli-fail "invalid_request" (concat arg " requires a nonnegative integer")))
+                (if (equal arg "--limit")
+                    (setq limit (string-to-number value))
+                  (setq offset (string-to-number value)))))))
           ("--display" (setq display t))
           ("--full" (setq full t))
           ("--select" (setq select t))
@@ -133,6 +140,8 @@ ID is the compilation whose `get' recovers from a failure."
           (_ (cond ((not op) (setq op arg))
                    ((not id) (setq id arg))
                    (t (ch-agent-cli-fail "invalid_request" "Unexpected positional argument")))))))
+    (when (and (or search limit offset) (not (equal op "list")))
+      (ch-agent-cli-fail "invalid_request" "--search, --limit and --offset are only valid for list"))
     (pcase op
       ((or "start" "run")
        (unless (and command directory (not id) (not select) (not full))
@@ -150,7 +159,10 @@ ID is the compilation whose `get' recovers from a failure."
       ("doctor"
        (when (or id command directory display full select)
          (ch-agent-cli-fail "invalid_request" "doctor only accepts --server")))
-      (_ (ch-agent-cli-fail "invalid_request" "Expected doctor, start, run, wait, get, or show")))
+      ("list"
+       (when (or id command directory display full select)
+         (ch-agent-cli-fail "invalid_request" "list only accepts --search, --limit and --offset")))
+      (_ (ch-agent-cli-fail "invalid_request" "Expected doctor, start, run, wait, get, show, or list")))
     (pcase op
       ("doctor" (ch-agent-cli-doctor))
       ("start" (ch-agent-cli-request `(:op start :command ,command :directory ,directory
@@ -166,7 +178,8 @@ ID is the compilation whose `get' recovers from a failure."
                (t (ch-agent-cli-error "invalid_response" "Start returned an invalid ID")))))
       ("wait" (ch-agent-cli-wait id))
       ("get" (ch-agent-cli-request `(:op get :id ,id :full ,full) id))
-      ("show" (ch-agent-cli-request `(:op show :id ,id :select ,select) id)))))
+      ("show" (ch-agent-cli-request `(:op show :id ,id :select ,select) id))
+      ("list" (ch-agent-cli-request `(:op list :search ,search :limit ,limit :offset ,offset) nil)))))
 
 ;; Without a UTF-8 locale Emacs leaves arguments as bytes, and prints
 ;; to stdout in the locale's coding system.
@@ -185,6 +198,7 @@ ID is the compilation whose `get' recovers from a failure."
       (princ (concat "Usage: compilation-history-agent [--server SOCKET] COMMAND [OPTIONS]\n"
                      "  doctor\n  start|run --command STRING --directory DIRECTORY [--display]\n"
                      "  wait ID\n  get ID [--full]\n  show ID [--select]\n"
+                     "  list [--search TEXT] [--limit N] [--offset N]\n"
                      "An existing local Emacs server is required. Protocol errors exit nonzero;\n"
                      "inspect state/exit_code for the compilation outcome.\n"))
       (kill-emacs 0))

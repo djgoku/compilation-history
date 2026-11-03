@@ -140,7 +140,29 @@ checks_recovery_after_disable() {
   check 'answer names the compilation ID' mentions "$ids"
 }
 
-scenarios=(single_failing_build two_concurrent_builds recovery_after_disable)
+setup_find_earlier_build() {
+  # Seeded oldest first; the newest lint failed, an older one passed, and a
+  # newer non-lint record sits on top.
+  local seed
+  for seed in '20260901T100000000001 make lint 0' '20260901T110000000002 make lint 2' \
+              '20260901T120000000003 make test 0'; do
+    set -- $seed
+    "$verify/observe.sh" "(progn (compilation-history--insert-compilation-record (make-compilation-history :record-id \"$1\" :command \"$2 $3\" :compile-directory \"$work/\" :buffer-name \"*seed*\" :system-info (list :os system-type))) (compilation-history--update-compilation-record \"$1\" $4 \"SEED-OUTPUT $4\"))" >/dev/null
+  done
+}
+prompt_find_earlier_build() {
+  printf 'Did the most recent `make lint` compilation in %s pass? Use compilation-history and tell me its compilation ID.' "$work"
+}
+checks_find_earlier_build() {
+  common_checks 1 3
+  check 'no build was started' eq $(( $(count start) + $(count run) )) 0
+  check 'list was used to find the record, once or twice' between "$(count list)" 1 2
+  check 'get was not used to poll' le "$(count get)" 1
+  check 'answer names the newest lint ID' mentions 20260901T110000000002
+  check 'answer reports the failure' mentions_re 'fail|exit(ed)?( with)?( code)? ?:? ?2'
+}
+
+scenarios=(single_failing_build two_concurrent_builds recovery_after_disable find_earlier_build)
 [ "$#" -eq 0 ] || scenarios=("$@")
 total_cost=0
 for round in $(seq 1 "${CH_EVAL_REPEAT:-1}"); do

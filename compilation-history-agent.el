@@ -46,6 +46,12 @@
   :type 'number
   :group 'compilation-history-agent)
 
+(defconst compilation-history-agent-list-default-limit 20
+  "Records `list' returns when the request names no limit.")
+
+(defconst compilation-history-agent-list-max-limit 100
+  "Largest limit a `list' request may name.")
+
 (defvar compilation-history-agent-mode nil)
 (defvar compilation-history-agent--runtime-directory nil
   "Private directory holding the interface socket.")
@@ -119,6 +125,7 @@ With ID, include it and the `get' command that recovers its history."
                     ('start '(:op :command :directory :display))
                     ('get '(:op :id :full))
                     ('show '(:op :id :select))
+                    ('list '(:op :search :limit :offset))
                     (_ (compilation-history-agent--invalid "Unknown operation")))))
     (cl-loop for (key value) on request by #'cddr
              unless (memq key allowed)
@@ -127,6 +134,22 @@ With ID, include it and the `get' command that recovers its history."
              do (compilation-history-agent--invalid "Flags must be t or nil"))
     (when (memq op '(get show))
       (compilation-history-agent--validate-id (plist-get request :id)))
+    (when (eq op 'list)
+      (let ((search (plist-get request :search))
+            (limit (plist-get request :limit))
+            (offset (plist-get request :offset)))
+        (unless (or (null search)
+                    (and (stringp search) (not (string-empty-p (string-trim search)))
+                         (not (string-search "\0" search))))
+          (compilation-history-agent--invalid "Search must be nonempty text without NUL"))
+        (unless (or (null limit)
+                    (and (natnump limit)
+                         (<= 1 limit compilation-history-agent-list-max-limit)))
+          (compilation-history-agent--invalid
+           (format "Limit must be an integer from 1 to %d"
+                   compilation-history-agent-list-max-limit)))
+        (unless (or (null offset) (natnump offset))
+          (compilation-history-agent--invalid "Offset must be a nonnegative integer"))))
     request))
 
 ;;; Transport
@@ -147,7 +170,10 @@ named by `output_file', because Emacs sends large strings to clients slowly."
                  ('get (compilation-history-agent-get
                         (plist-get request :id) (plist-get request :full)))
                  ('show (compilation-history-agent-show
-                         (plist-get request :id) (plist-get request :select)))))
+                         (plist-get request :id) (plist-get request :select)))
+                 ('list (compilation-history-agent-list
+                         (plist-get request :search) (plist-get request :limit)
+                         (plist-get request :offset)))))
            (compilation-history-agent-invalid-request
             (compilation-history-agent--error-reply "invalid_request" (error-message-string err)))
            (error
@@ -333,6 +359,39 @@ Non-nil DISPLAY shows the buffer on the selected frame."
                   `((output . ,output))
                 (compilation-history-agent--tail output)))))))
     (error (compilation-history-agent--error-reply "history_unavailable" (error-message-string err)))))
+
+(defun compilation-history-agent-list (&optional search limit offset)
+  "Return up to LIMIT persisted records newest first, skipping OFFSET.
+Non-nil SEARCH filters them as the history view's search does.  Records
+carry no output; `get' reads it."
+  (let ((limit (or limit compilation-history-agent-list-default-limit))
+        (offset (or offset 0)))
+    (condition-case err
+        (if (not (file-exists-p compilation-history-db-file))
+            (compilation-history-agent--error-reply "history_unavailable" "History database does not exist")
+          `((protocol_version . 1)
+            (search . ,(or search :null))
+            (total . ,(if search
+                          (compilation-history--count-records-fts search)
+                        (compilation-history--count-records)))
+            (offset . ,offset)
+            (records
+             . ,(vconcat
+                 (mapcar
+                  (pcase-lambda (`(,id ,_buffer ,command ,directory ,start ,end ,exit ,killed
+                                       ,branch ,_ ,_ ,duration))
+                    (let* ((state (compilation-history-agent--state exit (eql killed 1) end))
+                           (running (equal state "running")))
+                      `((id . ,id) (state . ,state)
+                        (exit_code . ,(if running :null (or exit :null)))
+                        (duration_seconds . ,(if running :null (or duration :null)))
+                        (start_time . ,start)
+                        (command . ,command) (directory . ,directory)
+                        (git_branch . ,(or branch :null)))))
+                  (if search
+                      (compilation-history--query-page-fts limit offset search)
+                    (compilation-history--query-page limit offset)))))))
+      (error (compilation-history-agent--error-reply "history_unavailable" (error-message-string err))))))
 
 (defun compilation-history-agent--find-buffer (id)
   "Return a live buffer whose history record has ID."
