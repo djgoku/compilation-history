@@ -22,7 +22,7 @@ assert_json() {
 assert_status() { [ "$status" -eq "$1" ] || { printf 'FAIL case %s status: %s\n' "$count" "$status" >&2; cat "$test_root/out" "$test_root/err" >&2; exit 1; }; }
 assert_invalid() { assert_status 1; assert_json '.error == "invalid_request"'; }
 
-for command in doctor start run wait show get; do
+for command in doctor start run wait show get list; do
   run_case "$command" --unsupported; assert_invalid
 done
 run_case wait 'id") (kill-emacs)'; assert_invalid
@@ -34,6 +34,12 @@ run_case wait "$id" --display; assert_invalid
 run_case get "$id" extra; assert_invalid
 run_case doctor "$id"; assert_invalid
 run_case doctor --server ''; assert_invalid
+run_case list "$id"; assert_invalid
+run_case list --full; assert_invalid
+run_case list --limit -1; assert_invalid
+run_case list --limit 2x; assert_invalid
+run_case list --search ''; assert_invalid
+run_case get "$id" --search make; assert_invalid
 run_case bogus; assert_invalid
 run_case --version
 assert_invalid; assert_json '.message == "Unknown option: --version"'

@@ -60,6 +60,11 @@ indicates omitted earlier output.
 | Recovery is missing, partial, or still `running` | Report that completion is unconfirmed; retain the ID. Do not poll `get`, query SQLite, or rerun the build. |
 | Earlier output is actually needed | Use `get ID --full` explicitly; prefer the compact tail otherwise. |
 
+To find an earlier compilation the user refers to without an ID, run
+`compilation-history-agent list --search TEXT` (view search syntax, including
+`compile_command:make`; `--limit N`, default 20). Pick the ID from its
+summaries, then use `get ID` for output. Do not poll `list` for status.
+
 `get` is persisted history, not live status; it works with agent mode disabled.
 Its output can differ from the displayed tail. Completed wait results expire
 (default one hour); losing a waiter does not cancel the compilation.

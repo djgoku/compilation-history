@@ -73,6 +73,7 @@ compilation-history-agent run --directory "$PWD" --command "make test"
 compilation-history-agent start --directory "$PWD" --command "make test"
 compilation-history-agent wait COMPILATION_ID
 compilation-history-agent get COMPILATION_ID --full
+compilation-history-agent list --search "make test" --limit 5
 #+end_src
 
 Server selection is =--server SOCKET= first, then
@@ -98,6 +99,7 @@ the interface never overrides it.
 | =run --command STRING --directory DIR [--display]= | Start then wait; print only the final result |
 | =get ID [--full]= | Read persisted history with one core-owned SQL query, even with agent mode off |
 | =show ID [--select]= | Display a still-live compilation buffer on the selected frame; no SQL reads |
+| =list [--search TEXT] [--limit N] [--offset N]= | List persisted records newest first, filtered like the history view's search; no output |
 
 Every response is one versioned JSON object (except =--help=). Exit status zero
 means successful protocol delivery, *not* necessarily a successful build. Inspect
@@ -118,6 +120,12 @@ disconnect, use =get= as a recovery attempt; a failed persistence write or crash
 may leave only earlier incremental output. Very long temporary-directory paths
 can exceed the operating system's Unix-socket path limit, so enabling the mode
 fails.
+
+=list= returns =total= matching records and up to =--limit= (default 20, at
+most 100) summaries from =--offset=: =id=, =state=, =exit_code=,
+=duration_seconds=, =start_time= in the recording machine's local time,
+=command=, =directory=, and =git_branch=. =--search= uses the history view's
+syntax, including =column:value=. Summaries omit output; use =get ID= for it.
 
 Wait results have the same shape as =get=: the final 4096 Unicode characters
 of persisted output plus a =tail_truncated= flag. =--full= substitutes =output=

@@ -46,6 +46,9 @@ Evidence for every run is kept under `.verify/agent-skill/`.
 - `recovery_after_disable`: the interface is disabled while the agent waits;
   the agent must not restart the build or wait again, and recovers with one
   or two `get` calls.
+- `find_earlier_build`: three seeded records, no build to run; the agent
+  finds the newest `make lint` with `list`, starts nothing, and reports that
+  record's ID and failure.
 
 Every scenario also requires: the skill was loaded, no refused commands,
 `doctor` first and only once (twice allowed in recovery), no display commands,

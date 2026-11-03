@@ -31,7 +31,10 @@
                      (:op show :id "20260903T120000000081" :select :null)
                      (:op start :command "true" :directory "/" :display "yes")
                      (:op get :id 4) (:op get :id "../etc")
-                     (:op get :id "2026090T120000000081")))
+                     (:op get :id "2026090T120000000081")
+                     (:op list :search "") (:op list :search " ") (:op list :search 4)
+                     (:op list :limit 0) (:op list :limit 101) (:op list :limit 1.5)
+                     (:op list :offset -1) (:op list :id "20260903T120000000081")))
     (let ((reply (compilation-history-agent-test-request request)))
       (should (= 1 (alist-get 'protocol_version reply)))
       (should (equal "invalid_request" (alist-get 'error reply))))))
@@ -381,6 +384,42 @@
       (let ((reply (compilation-history-agent-test-get id)))
         (should (equal "succeeded" (alist-get 'state reply)))
         (should (string-match-p "recovered" (alist-get 'tail reply)))))))
+
+;;; List
+
+(ert-deftest agent-list-pages-newest-first-and-searches-without-output ()
+  (compilation-history-agent-test-with-session
+    (compilation-history-agent-mode -1)
+    (compilation-history--ensure-db)
+    (dolist (case '(("20260903T120000000081" "make build" 0)
+                    ("20260903T120000000082" "make test" 2)
+                    ("20260903T120000000083" "cargo test" nil)))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record :record-id (car case) :command (nth 1 case)))
+      (when (nth 2 case)
+        (compilation-history--update-compilation-record (car case) (nth 2 case) "secret-out" nil)))
+    (let ((reply (compilation-history-agent-test-request '(:op list))))
+      (should (= 3 (alist-get 'total reply)))
+      (should (equal '("20260903T120000000083" "20260903T120000000082" "20260903T120000000081")
+                     (mapcar (lambda (r) (alist-get 'id r)) (alist-get 'records reply))))
+      (should (equal '("running" "failed" "succeeded")
+                     (mapcar (lambda (r) (alist-get 'state r)) (alist-get 'records reply))))
+      (should-not (string-search "secret-out" (prin1-to-string reply))))
+    (let ((reply (compilation-history-agent-test-request '(:op list :limit 1 :offset 1))))
+      (should (= 3 (alist-get 'total reply)))
+      (should (equal '("20260903T120000000082")
+                     (mapcar (lambda (r) (alist-get 'id r)) (alist-get 'records reply)))))
+    (dolist (case '(("test" 2) ("compile_command:make" 2) ("ca" 1) ("secret-out" 2) ("nothing-matches" 0)))
+      (let ((reply (compilation-history-agent-test-request `(:op list :search ,(car case)))))
+        (should (equal (car case) (alist-get 'search reply)))
+        (should (= (nth 1 case) (alist-get 'total reply)))
+        (should (= (nth 1 case) (length (alist-get 'records reply))))))))
+
+(ert-deftest agent-list-without-a-database-does-not-create-one ()
+  (compilation-history-test-with-db
+    (should (equal "history_unavailable"
+                   (alist-get 'error (compilation-history-agent-test-request '(:op list)))))
+    (should-not (file-exists-p compilation-history-db-file))))
 
 ;;; Show
 

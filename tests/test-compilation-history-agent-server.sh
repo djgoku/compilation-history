@@ -84,6 +84,12 @@ vertical_id=$(jq -r '.id' "$test_root/vertical")
 check '.exit_code == 0 and (.tail | contains("vertical-λ-🚀"))' "$test_root/vertical-get"
 printf 'PASS real CLI vertical slice\n'
 
+"${cli[@]}" list --search 'vertical-λ' --limit 5 > "$test_root/list"
+jq -e --arg id "$vertical_id" '.total == 1 and .records[0].id == $id and .records[0].state == "succeeded" and (.records[0] | has("tail") | not)' "$test_root/list" >/dev/null
+"${cli[@]}" list --limit 1 > "$test_root/list-newest"
+check ".records[0].id == \"$vertical_id\" and (.records | length) == 1" "$test_root/list-newest"
+printf 'PASS real CLI list and search\n'
+
 command_value=$'printf \'$HOME "λ" 🚀 \\\\ \'\n# $(touch SHOULD_NOT_EXIST)'
 "${cli[@]}" start --directory "$test_root" --command "$command_value" > "$test_root/hostile"
 jq -e --arg command "$command_value" '.command == $command' "$test_root/hostile" >/dev/null
