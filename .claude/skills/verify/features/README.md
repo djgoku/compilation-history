@@ -57,5 +57,6 @@ Agent CLI (`launch.sh`):
 - [Doctor](./doctor.md) covers health reporting with the interface on and off.
 - [Run, start and wait](./run-and-wait.md) covers starting builds and blocking until they finish.
 - [Get persisted history](./get.md) covers the compact tail, full output and recovery.
+- [List and search history](./list.md) covers newest-first listing, paging, search and bad input.
 - [Show a compilation](./show.md) covers displaying and selecting buffers.
-- [Interface lifecycle](./interface-lifecycle.md) covers disable, expiry and unknown IDs.
+- [Interface lifecycle](./interface-lifecycle.md) covers disable, re-enable, expiry, waits on unknown IDs and killed builds.

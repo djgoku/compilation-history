@@ -9,7 +9,8 @@
 - `view-preview` shows the record at point with `SPC` and keeps the view selected; `n`/`p` then move and update the preview.
 - `view-refresh` picks up new compilations with `g`.
 - `view-paging` moves between pages with `C-v`, `M-v`, `<`, `>`.
-- `view-quit` buries opened buffers and the view with `q`; `Q` kills them.
+- `view-quit` hides the view and its opened buffers with `q`, keeping them live.
+- `view-kill-all` kills the view and every `*compilation-history-*` buffer with `Q`, including compiles the view never opened.
 
 ## How to get to it (user POV)
 
@@ -25,12 +26,14 @@ Preconditions:
 - **Open a record.** Run `$S/keys.sh M-\<` then `$S/keys.sh Enter`. `$S/observe.sh '(buffer-name (window-buffer (selected-window)))'` names the `beta-marker` compilation buffer, and `screen.sh` shows its output below the view.
 - **Preview.** Run `$S/keys.sh C-x o` back to the view, `$S/keys.sh Space`, then `$S/keys.sh n`. The selected window stays `*Compilation History*` and the other window switches to the `alpha-marker` buffer.
 - **Refresh.** Run another `cli.sh run` with `printf 'gamma-marker\n'`, then `$S/keys.sh g`. The footer reads `(3 records)` and row 1 is `gamma-marker`.
-- **Paging.** Run `tmux -S "$VERIFY_ROOT/tmux.sock" resize-window -t verify -y 12`, make 8 more records with `cli.sh run`, then `$S/keys.sh g`. The footer shows `Page 1 of N` with N > 1; `C-v` shows `Page 2`, `>` the last page, `<` page 1.
+- **Paging.** Run `tmux -S "$VERIFY_ROOT/tmux.sock" resize-window -t verify -y 12`, make 8 more records with `cli.sh run`, then `$S/keys.sh g` and `$S/screen.sh --wait 'Page 1 of [0-9]+ \(11 records\)'`. The footer reads `Page 1 of N` with N greater than 1; `C-v` shows `Page 2`, `>` the last page, `<` page 1. Restore the pane with `resize-window -t verify -y 48`.
 - **Quit.** Run `$S/keys.sh q`. The view and opened buffers are no longer displayed; `$S/observe.sh '(get-buffer "*Compilation History*")'` is still a live buffer.
+- **Kill all.** Run `$S/keys.sh C-c c v`, then `$S/keys.sh Q`. `$S/observe.sh '(length (seq-filter (lambda (b) (string-prefix-p "*compilation-history-" (buffer-name b))) (buffer-list)))'` is `0`, though the view opened only two of the eleven, and `*Compilation History*` is gone.
 
 ## Gotchas
 
 - The `#` header is the window's header line, not buffer text. Buffer line 1 is the newest row; `M-<` lands on it.
 - `n` and `p` only update the other window after `SPC` turns preview on. Send it as `keys.sh Space`; `keys.sh SPC` types the letters S, P and C.
-- Page size is the window height minus 6, so paging needs a short window or many records.
+- Page size is the view window's height minus 6, recomputed only on `g`. After a record is opened the view has about half the frame, so a 12-row pane shows one row per page.
+- Run `search.md` before the Refresh step. Its counts assume only the alpha and beta records.
 - Rows sort by start time, and compilations started in the same second list newest first.

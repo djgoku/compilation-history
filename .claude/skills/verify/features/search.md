@@ -18,7 +18,7 @@ In the history view, `s` prompts for a search over command, directory, git branc
 
 Preconditions:
 
-- A `--tui` launch with the `alpha-marker` and `beta-marker` records from `history-view.md`, and the view open.
+- A `--tui` launch with only the `alpha-marker` and `beta-marker` records from `history-view.md`'s preconditions, and the view open. Run this before `history-view.md`'s Refresh step adds more.
 
 - **Plain.** Run `$S/keys.sh s`, `$S/keys.sh -l beta`, `$S/keys.sh Enter`, then `$S/screen.sh --wait '\(1 records\)' search-plain`. Only `beta-marker` is listed and the mode line shows `[search: beta]`.
 - **Output only.** Search `output:alpha-marker`. Only the `alpha-marker` row is listed.
