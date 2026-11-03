@@ -73,7 +73,8 @@ Its output can differ from the displayed tail. Completed wait results expire
 
 Leave windows alone unless requested. `start --display` or `show ID` displays
 without selecting; `show ID --select` selects only when requested. Neither raises
-OS focus. Display fields are snapshots, not a monitoring stream. Do not poll
+OS focus. `show` also reopens an earlier compilation whose buffer was closed,
+such as an ID found with `list`, from its saved output. Display fields are snapshots, not a monitoring stream. Do not poll
 them.
 
 Do not use direct SQLite, raw Elisp, an MCP workaround, or another Emacs process

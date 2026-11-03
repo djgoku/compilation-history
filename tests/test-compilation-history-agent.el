@@ -490,6 +490,34 @@
           (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-finished
                                                         (alist-get 'id started))))))))))
 
+(ert-deftest agent-show-reopens-a-closed-compilation-from-history ()
+  (compilation-history-agent-test-with-session
+    (let* ((window (selected-window))
+           (id (alist-get 'id (compilation-history-agent-test-start "printf 'reopened\\n'; exit 5"))))
+      (compilation-history-agent-test-finished id)
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer (compilation-history-agent--find-buffer id)))
+      (should-not (compilation-history-agent--find-buffer id))
+      (let* ((reply (compilation-history-agent-test-request `(:op show :id ,id)))
+             (buffer (get-buffer (alist-get 'buffer reply))))
+        (should (equal "failed" (alist-get 'state reply)))
+        (should (eq t (alist-get 'visible (alist-get 'display reply))))
+        (should (eq window (selected-window)))
+        (should (eq buffer (compilation-history-agent--find-buffer id)))
+        (should (with-current-buffer buffer
+                  (and compilation-history-buffer-mode
+                       (string-search "reopened" (buffer-string)))))
+        (compilation-history-agent-test-request `(:op show :id ,id))
+        (should (= 1 (cl-count-if (lambda (b) (eq b (compilation-history-agent--find-buffer id)))
+                                  (buffer-list))))))))
+
+(ert-deftest agent-show-without-a-database-does-not-create-one ()
+  (compilation-history-test-with-db
+    (should (equal "unknown_id"
+                   (alist-get 'error (compilation-history-agent-test-request
+                                      '(:op show :id "20260903T120000000082")))))
+    (should-not (file-exists-p compilation-history-db-file))))
+
 (ert-deftest agent-show-reports-reopened-history-buffers-with-their-terminal-state ()
   (compilation-history-agent-test-with-session
     (compilation-history--ensure-db)

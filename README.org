@@ -98,7 +98,7 @@ the interface never overrides it.
 | =wait ID= | Receive a retained result or block on one socket connection until the job finishes |
 | =run --command STRING --directory DIR [--display]= | Start then wait; print only the final result |
 | =get ID [--full]= | Read persisted history with one core-owned SQL query, even with agent mode off |
-| =show ID [--select]= | Display a still-live compilation buffer on the selected frame; no SQL reads |
+| =show ID [--select]= | Display a compilation's buffer on the selected frame, recreating a closed one from history as the view does |
 | =list [--search TEXT] [--limit N] [--offset N]= | List persisted records newest first, filtered like the history view's search; no output |
 
 Every response is one versioned JSON object (except =--help=). Exit status zero

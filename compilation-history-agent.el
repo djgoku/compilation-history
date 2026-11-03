@@ -33,6 +33,7 @@
 ;;; Code:
 
 (require 'compilation-history)
+(require 'compilation-history-view)
 (require 'cl-lib)
 (require 'subr-x)
 (require 'rx)
@@ -410,32 +411,48 @@ carry no output; `get' reads it."
       (display-buffer-use-some-window buffer (cons '(inhibit-same-window . t) alist))
       (display-buffer-no-window buffer alist)))
 
+(defun compilation-history-agent--reopen (id)
+  "Recreate ID's buffer from history as the view does, or return nil.
+Never create the database."
+  (when (file-exists-p compilation-history-db-file)
+    (when-let* ((row (compilation-history--get-record id)))
+      (compilation-history-view--get-or-create-compilation-buffer
+       (compilation-history-view--row-to-plist row)))))
+
 (defun compilation-history-agent-show (id &optional select)
-  "Show ID's live buffer on the selected frame; SELECT its window if non-nil.
-Never raise a frame or request operating-system focus."
-  (if-let* ((buffer (compilation-history-agent--find-buffer id)))
-      (condition-case err
-          (let* ((frame (selected-frame))
-                 (display-buffer-overriding-action
-                  `(compilation-history-agent--display-on-frame
-                    (reusable-frames . ,frame) (inhibit-switch-frame . t) (allow-no-window . t)))
-                 (window (save-selected-window (display-buffer buffer)))
-                 (record (buffer-local-value 'compilation-history-record buffer))
-                 (exit (compilation-history-exit-code record)))
-            (unless (and (window-live-p window) (eq frame (window-frame window)))
-              (error "No compilation window is available on the selected frame"))
-            (when select (select-window window))
-            `((protocol_version . 1) (id . ,id)
-              (state . ,(compilation-history-agent--state
-                         exit
-                         (string-match-p (rx (or "killed" "interrupt"))
-                                         (or (compilation-history-message record) ""))
-                         (and exit (not (process-live-p (get-buffer-process buffer))))))
-              (buffer . ,(buffer-name buffer))
-              (display . ,(compilation-history-agent--display-state buffer))))
-        (error (compilation-history-agent--error-reply
-                "display_unavailable" (error-message-string err) id)))
-    (compilation-history-agent--error-reply "unknown_id" "No live compilation buffer" id)))
+  "Show ID's buffer on the selected frame; SELECT its window if non-nil.
+A closed compilation's buffer is recreated from history first.  Never
+raise a frame or request operating-system focus."
+  (pcase (condition-case err
+             (or (compilation-history-agent--find-buffer id)
+                 (compilation-history-agent--reopen id))
+           (error (compilation-history-agent--error-reply
+                   "history_unavailable" (error-message-string err) id)))
+    ('nil (compilation-history-agent--error-reply
+           "unknown_id" "No compilation buffer or history record" id))
+    ((and (pred consp) reply) reply)
+    (buffer
+     (condition-case err
+         (let* ((frame (selected-frame))
+                (display-buffer-overriding-action
+                 `(compilation-history-agent--display-on-frame
+                   (reusable-frames . ,frame) (inhibit-switch-frame . t) (allow-no-window . t)))
+                (window (save-selected-window (display-buffer buffer)))
+                (record (buffer-local-value 'compilation-history-record buffer))
+                (exit (compilation-history-exit-code record)))
+           (unless (and (window-live-p window) (eq frame (window-frame window)))
+             (error "No compilation window is available on the selected frame"))
+           (when select (select-window window))
+           `((protocol_version . 1) (id . ,id)
+             (state . ,(compilation-history-agent--state
+                        exit
+                        (string-match-p (rx (or "killed" "interrupt"))
+                                        (or (compilation-history-message record) ""))
+                        (and exit (not (process-live-p (get-buffer-process buffer))))))
+             (buffer . ,(buffer-name buffer))
+             (display . ,(compilation-history-agent--display-state buffer))))
+       (error (compilation-history-agent--error-reply
+               "display_unavailable" (error-message-string err) id))))))
 
 ;;; Runtime
 
