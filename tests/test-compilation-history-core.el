@@ -1021,6 +1021,61 @@ compile-command in the original buffer via setcar on compilation-arguments."
               (sqlite-close db)))
         (kill-buffer buffer)))))
 
+(ert-deftest test-comint-saved-output-includes-typed-input ()
+  "Input typed into a comint compilation is saved, so output matches the buffer."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (compilation-history-mode 1)
+    (let ((buffer (compile "while printf 'you> ' && read -r line; do [ \"$line\" = quit ] && exit 0; echo \"bot: $line\"; done" t)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (let ((proc (get-buffer-process buffer)))
+              (dolist (line '("hello there" "quit"))
+                (while (not (string-suffix-p "you> " (buffer-string)))
+                  (accept-process-output proc 0.1))
+                (goto-char (point-max))
+                (insert line)
+                (comint-send-input))
+              (while compilation-in-progress
+                (accept-process-output nil 0.1)))
+            (let* ((db (sqlite-open temp-db))
+                   (saved (caar (sqlite-select
+                                 db "SELECT output FROM compilations WHERE id = ?"
+                                 (vector (compilation-history-record-id
+                                          compilation-history-record))))))
+              (sqlite-close db)
+              (should (string-match-p "you> hello there\nbot: hello there\nyou> quit\n" saved))
+              (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                             saved))))
+        (compilation-history-mode -1)
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer buffer))))))
+
+(ert-deftest test-comint-hidden-password-not-saved ()
+  "A password read at a hidden comint prompt reaches the process but is never saved."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (compilation-history-mode 1)
+    (cl-letf (((symbol-function 'read-passwd) (lambda (&rest _) (copy-sequence "hunter2-secret"))))
+      (let ((buffer (compile "printf 'Password: '; read p; echo \"len ${#p}\"" t)))
+        (unwind-protect
+            (with-current-buffer buffer
+              (while compilation-in-progress
+                (accept-process-output nil 0.1))
+              (let* ((db (sqlite-open temp-db))
+                     (saved (caar (sqlite-select
+                                   db "SELECT output FROM compilations WHERE id = ?"
+                                   (vector (compilation-history-record-id
+                                            compilation-history-record))))))
+                (sqlite-close db)
+                (should (string-match-p "Password: len 14\n" saved))
+                (should-not (string-match-p "hunter2" saved))
+                (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                               saved))))
+          (compilation-history-mode -1)
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer buffer)))))))
+
 (ert-deftest test-comint-hook-removed-after-finish ()
   "Test that comint preoutput filter is removed after compilation finishes."
   (compilation-history-test-with-db

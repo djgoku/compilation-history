@@ -29,7 +29,7 @@ Preconditions:
 - **No leaked file.** Run `find "$VERIFY_ROOT" -maxdepth 1 -name 'ch-agent-output-*' | wc -l`. Prints `0`.
 - **Running.** Run `rid=$($S/cli.sh start --directory "$VERIFY_ROOT" --command 'sleep 3' | jq -r .id)` then `$S/capture.sh get-running $S/cli.sh get "$rid"`. `.state == "running"`, `.exit_code == null`, `.duration_seconds == null`.
 - **Unknown.** Run `$S/capture.sh get-unknown $S/cli.sh get 20000101T000000000000`. Exit 1; `.error == "unknown_id"` and no `recovery` key. `$S/capture.sh get-invalid $S/cli.sh get not-an-id` exits 1 with `invalid_request`.
-- **Interface off.** Run `$S/observe.sh '(compilation-history-agent-mode -1)'`, then `$S/capture.sh get-off $S/cli.sh get "$id"`. Exit 0 with the same state as `get-tail`. Restore with `$S/observe.sh '(compilation-history-agent-mode 1)'`.
+- **Interface off.** Run `$S/observe.sh '(compilation-history-agent-mode -1)'`, then `$S/capture.sh get-interface-off $S/cli.sh get "$id"`. Exit 0 with the same state as `get-tail`. Restore with `$S/observe.sh '(compilation-history-agent-mode 1)'`.
 - **Large.** Run `big=$($S/cli.sh run --directory "$VERIFY_ROOT" --command 'head -c 4194304 /dev/zero | tr "\0" x' | jq -r .id)`, then time `$S/capture.sh get-large $S/cli.sh get "$big" --full`. `(.output | length)` is over 4194304 and the call takes about a second.
 
 ## Gotchas

@@ -26,7 +26,7 @@ Preconditions:
 - **No output.** Run `jq -e '[.records[] | has("tail") or has("output")] | any | not' "$VERIFY_EVIDENCE/list-all.out"`.
 - **Page.** Run `$S/capture.sh list-page $S/cli.sh list --limit 1 --offset 1`. `.total == 2`, `.offset == 1`, and the only record is `$a`.
 - **Search.** Run `$S/capture.sh list-search $S/cli.sh list --search 'compile_command:LIST-B'`. `.total == 1` and the record is `$b`. Then `$S/capture.sh list-short $S/cli.sh list --search 'B;'`, which takes the under-3-character path and also returns only `$b`.
-- **Invalid.** Run `$S/capture.sh list-bad-limit $S/cli.sh list --limit 101` and `$S/capture.sh list-bad-flag $S/cli.sh list --full`. Each exits 1 with `.error == "invalid_request"`.
+- **Invalid.** Run `$S/capture.sh list-bad-limit $S/cli.sh list --limit 101` `$S/capture.sh list-bad-flag $S/cli.sh list --full` and `$S/capture.sh list-empty $S/cli.sh list --search ''`. Each exits 1 with `.error == "invalid_request"`.
 - **Interface off.** Run `$S/observe.sh '(compilation-history-agent-mode -1)'`, then `$S/capture.sh list-off $S/cli.sh list`. Exit 0 with `.total == 2`. Restore with `$S/observe.sh '(compilation-history-agent-mode 1)'`.
 
 ## Gotchas
