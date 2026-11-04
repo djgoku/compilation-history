@@ -1,6 +1,6 @@
 # Show a compilation
 
-`show` displays a compilation's buffer on the selected Emacs frame without selecting it, unless `--select` is given. When the buffer was closed, it first recreates it from the saved record and output, as `RET` in the history view does. `start --display` and `run --display` do the same at start. Each of these replies holds only `protocol_version`, `id`, `state`, `buffer` and `display`; `get` has the outcome. Nothing raises a frame or requests OS focus.
+`show` displays a compilation's buffer on the selected Emacs frame without selecting it, unless `--select` is given. When the buffer was closed, it first recreates it from the saved record and output, as `RET` in the history view does. `start --display` and `run --display` do the same at start. A `show` reply holds only `protocol_version`, `id`, `state`, `buffer` and `display`, so `get` has the outcome. `start --display` adds `command` and `directory`, as any `start` reply does, and `run --display` returns the full `get` result plus `display`. Nothing raises a frame or requests OS focus.
 
 ## Sub-features
 

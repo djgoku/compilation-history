@@ -598,6 +598,8 @@ Then run `compilation-history-final-save-functions', including on failure."
       (remove-hook 'compilation-filter-hook #'compilation-history--capture-raw-output t)
       (remove-hook 'comint-preoutput-filter-functions
                    #'compilation-history--comint-capture-raw-output t)
+      (remove-hook 'comint-input-filter-functions
+                   #'compilation-history--comint-capture-raw-output t)
       ;; `compilation-handle-exit' marks the finish message it inserts.
       (let* ((footer (buffer-substring-no-properties
                       (or (previous-single-property-change
@@ -619,6 +621,8 @@ Then run `compilation-history-final-save-functions', including on failure."
 Avoids marking a record as killed when it already exited successfully."
   (compilation-history--cancel-save-timer)
   (remove-hook 'comint-preoutput-filter-functions
+               #'compilation-history--comint-capture-raw-output t)
+  (remove-hook 'comint-input-filter-functions
                #'compilation-history--comint-capture-raw-output t)
   (when (and (boundp 'compilation-history-record) compilation-history-record)
     (unless (compilation-history-exit-code compilation-history-record)
@@ -705,8 +709,10 @@ Runs on `compilation-filter-hook' at depth -90, before
                 (buffer-substring-no-properties compilation-filter-start (point)))))
 
 (defun compilation-history--comint-capture-raw-output (string)
-  "Capture raw comint output STRING before ANSI filtering.
-Intended for `comint-preoutput-filter-functions'."
+  "Append comint STRING to the raw output, before ANSI filtering.
+Runs on `comint-preoutput-filter-functions' for process output and on
+`comint-input-filter-functions' for sent input, which comint inserts
+into the buffer without passing it through the output filters."
   (setq compilation-history--raw-output
         (concat compilation-history--raw-output string))
   string)
@@ -731,8 +737,11 @@ for line-threshold saves."
   (setq-local compilation-history--raw-output "")
   (setq-local compilation-history--header (buffer-substring-no-properties (point-min) (point-max)))
   (if (derived-mode-p 'comint-mode)
-      (add-hook 'comint-preoutput-filter-functions
-                #'compilation-history--comint-capture-raw-output nil t)
+      (progn
+        (add-hook 'comint-preoutput-filter-functions
+                  #'compilation-history--comint-capture-raw-output nil t)
+        (add-hook 'comint-input-filter-functions
+                  #'compilation-history--comint-capture-raw-output nil t))
     (add-hook 'compilation-filter-hook #'compilation-history--capture-raw-output -90 t))
   (compilation-history--restart-save-timer)
   (when compilation-history-save-line-threshold
