@@ -330,11 +330,13 @@ without referencing the handle directly."
 (defun compilation-history--ensure-db ()
   "Ensure the compilation history database exists and is initialized.
 Creates the main table, FTS5 virtual table, and sync triggers
-if they don't exist."
+if they don't exist.  Puts the database in WAL mode, so reading
+history never waits for another Emacs that is saving output."
   (let ((db-dir (file-name-directory compilation-history-db-file)))
     (unless (file-directory-p db-dir)
       (make-directory db-dir t))
     (compilation-history--with-db db
+      (sqlite-pragma db "journal_mode = WAL")
       (sqlite-execute db compilation-history-db-schema)
       (sqlite-execute db compilation-history-db-fts-schema)
       (dolist (trigger compilation-history-db-fts-triggers)
