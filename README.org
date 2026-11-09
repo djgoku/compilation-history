@@ -17,6 +17,7 @@ analyze build patterns and debug compilation issues.
 - Incremental output saving for crash resilience
 - Unique buffer names per compilation for easy identification
 - Recompile support from history buffers
+- Several Emacs instances can share one database, and a compilation running in another Emacs opens as a live mirror
 
 * Requirements
 
@@ -136,6 +137,15 @@ Path to the SQLite database file.
       (expand-file-name "compilation-history.db" user-emacs-directory))
 #+end_src
 
+** =compilation-history-db-busy-timeout=
+
+Milliseconds to wait when another Emacs holds the database lock. Emacs is blocked while it waits. If the wait runs out, a write signals =sqlite-locked-error=, except a periodic output save, which skips and retries on the next save.
+
+#+begin_src elisp
+;; Default: 2000
+(setq compilation-history-db-busy-timeout 2000)
+#+end_src
+
 ** =compilation-history-command-truncate-length=
 
 Maximum length of the sanitized command in buffer names.
@@ -183,6 +193,15 @@ How to split the window when opening or previewing a compilation from the histor
 ;; Default: 'horizontal (above/below)
 ;; Options: 'horizontal, 'vertical (side-by-side)
 (setq compilation-history-view-split-direction 'horizontal)
+#+end_src
+
+** =compilation-history-view-mirror-refresh-interval=
+
+Seconds between reloads of a mirror's output while it shows in a window (see [[*Several Emacs Instances][Several Emacs Instances]]). The other Emacs saves output only every =compilation-history-save-interval= seconds or =compilation-history-save-line-threshold= lines, so an interval shorter than that adds database reads but no new output.
+
+#+begin_src elisp
+;; Default: 2
+(setq compilation-history-view-mirror-refresh-interval 2)
 #+end_src
 
 ** =compilation-history-view-columns=
@@ -310,6 +329,28 @@ Column names and states are completed with =TAB= in the search minibuffer. Type 
 ** Clearing Search
 
 Press =s= and submit an empty string to clear the current search and show all records.
+
+* Several Emacs Instances
+
+Every Emacs with =compilation-history-mode= on writes to the same database, =compilation-history-db-file=.
+
+** Database locking
+
+The first compilation puts the database in SQLite's WAL mode, which SQLite stores in the database file. In WAL mode, reading history never waits for another Emacs that is saving output. While Emacs has the database open, =compilation-history.db-wal= and =compilation-history.db-shm= files sit next to it. WAL does not work on a network file system, so keep the database on a local disk. To switch back, run =PRAGMA journal_mode = DELETE= on the database.
+
+Two Emacs instances saving at once take turns. Each waits up to =compilation-history-db-busy-timeout= for the other.
+
+** Mirrors
+
+A compilation running in this Emacs always has a buffer here. Opening a record from the history view that is still running, but has no buffer here, opens a /mirror/: a read-only copy of a compilation that another Emacs is running.
+
+- The header line reads =Running in another Emacs, auto-refreshing.  g refreshes until it finishes.  Updated HH:MM:SS=. The time is when new output last arrived.
+- While the mirror shows in a window, it loads new output every =compilation-history-view-mirror-refresh-interval= seconds. With point at the end, it follows the output.
+- =g= loads new output now.
+- When the run finishes, the mirror loads the rest, the header changes to =Finished in another Emacs.  g now reruns the build here.=, and =g= reruns the build like any finished compilation.
+- =M-x recompile= in a mirror whose build is still running asks before starting a second run in this Emacs.
+
+The database does not record which Emacs owns a run. A run whose Emacs exited before it finished stays "running" forever, and its mirror shows an =Updated= time that stops advancing.
 
 * Hooks
 
