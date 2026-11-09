@@ -479,6 +479,20 @@ Only recognizes column:value when the column is a valid FTS column name."
       (cons (format "(%s)" (mapconcat #'identity clauses " OR "))
             (apply #'vector (make-list (length compilation-history--fts-column-names) pattern))))))
 
+(defun compilation-history--parse-search (search-term)
+  "Split SEARCH-TERM into (TEXT . STATE).
+A state:VALUE word selects records in that state, VALUE being a key of
+`compilation-history--state-sql'.  TEXT is the rest of SEARCH-TERM, or
+nil when nothing else remains.  Signal a `user-error' for an unknown state."
+  (if (string-match "\\(?:\\`\\| \\)state:\\(\\S-*\\)" search-term)
+      (let ((state (match-string 1 search-term))
+            (text (string-trim (replace-match "" t t search-term))))
+        (unless (assoc state compilation-history--state-sql)
+          (user-error "Unknown state \"%s\"; expected one of: %s" state
+                      (mapconcat #'car compilation-history--state-sql ", ")))
+        (cons (unless (string-empty-p text) text) state))
+    (cons search-term nil)))
+
 (defun compilation-history--count-records-fts (search-term &optional state)
   "Return the number of compilation records matching SEARCH-TERM.
 When STATE is non-nil, only count records in that state.

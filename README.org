@@ -281,6 +281,18 @@ Press =s= in the history view to search. The search uses SQLite FTS5 with trigra
 | =default_directory:frontend=  | Only compilations run from a directory containing "frontend" |
 | =output:undefined reference=  | Only compilations whose output contains "undefined reference" |
 
+*** State (=state:value=)
+
+State is not a stored column; it comes from the end time, exit code, and killed flag. A =state:= word filters by it and combines with the rest of the search.
+
+| Example                | Matches                                         |
+|------------------------+-------------------------------------------------|
+| =state:running=        | Compilations that have not finished yet         |
+| =state:failure=        | Finished with a non-zero exit code              |
+| =state:running make=   | Running compilations that mention "make"        |
+
+The states are =running=, =success=, =failure=, and =killed=. An unknown state is an error, and the current search stays.
+
 *** Short terms (< 3 characters)
 
 FTS5 trigram tokenization requires at least 3 characters. For shorter terms, the search automatically falls back to SQL =LIKE= queries. This is transparent — just type your search term.
@@ -293,7 +305,7 @@ FTS5 trigram tokenization requires at least 3 characters. For shorter terms, the
 
 ** Tab Completion
 
-Column names are completed with =TAB= in the search minibuffer. Type a few characters and press =TAB= to complete to a valid column name.
+Column names and states are completed with =TAB= in the search minibuffer. Type a few characters and press =TAB= to complete to a valid column name, or type =state:ru= and press =TAB= for =state:running=.
 
 ** Clearing Search
 
