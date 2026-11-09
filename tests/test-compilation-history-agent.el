@@ -186,9 +186,9 @@
 
 (ert-deftest agent-wait-delivers-the-persisted-result-over-the-socket ()
   (compilation-history-agent-test-with-session
-    (dolist (case '(("printf 'héllo λ 🚀\\n'" "succeeded" 0 "héllo λ 🚀")
-                    ("printf 'failed-marker\\n'; exit 7" "failed" 7 "failed-marker")
-                    ("printf 'raw\\377byte\\n'" "succeeded" 0 "raw�byte")))
+    (dolist (case '(("printf 'héllo λ 🚀\\n'" "success" 0 "héllo λ 🚀")
+                    ("printf 'failed-marker\\n'; exit 7" "failure" 7 "failed-marker")
+                    ("printf 'raw\\377byte\\n'" "success" 0 "raw�byte")))
       (let* ((start (compilation-history-agent-test-start (car case)))
              (id (alist-get 'id start))
              (waited (compilation-history-agent-test-reply
@@ -208,7 +208,7 @@
            (first (compilation-history-agent-test-wait id))
            (second (compilation-history-agent-test-wait id))
            (expected (compilation-history-agent-test-reply first)))
-      (should (equal "succeeded" (alist-get 'state expected)))
+      (should (equal "success" (alist-get 'state expected)))
       (should (equal expected (compilation-history-agent-test-reply second)))
       (should (equal expected (compilation-history-agent-test-reply
                                (compilation-history-agent-test-wait id))))
@@ -225,7 +225,7 @@
       (delete-process gone)
       (compilation-history-agent-test-pause 0.1)
       (should (process-live-p (get-buffer-process (get-buffer (alist-get 'buffer start)))))
-      (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-reply stays)))))))
+      (should (equal "success" (alist-get 'state (compilation-history-agent-test-reply stays)))))))
 
 (ert-deftest agent-wait-expiry-is-completion-based-and-history-survives ()
   (compilation-history-agent-test-with-session
@@ -235,8 +235,8 @@
            (waiter (compilation-history-agent-test-wait id)))
       (compilation-history-agent-test-pause 0.4)
       (should (process-live-p waiter))
-      (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-reply waiter))))
-      (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-reply
+      (should (equal "success" (alist-get 'state (compilation-history-agent-test-reply waiter))))
+      (should (equal "success" (alist-get 'state (compilation-history-agent-test-reply
                                                     (compilation-history-agent-test-wait id)))))
       (compilation-history-agent-test-await
        (lambda () (equal "wait_unavailable"
@@ -284,7 +284,7 @@
       (should-not (file-exists-p directory))
       (should (buffer-live-p buffer))
       (should (process-live-p (get-buffer-process buffer)))
-      (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-finished id)))))))
+      (should (equal "success" (alist-get 'state (compilation-history-agent-test-finished id)))))))
 
 (ert-deftest agent-wait-reports-killed-when-the-running-buffer-is-killed ()
   (compilation-history-agent-test-with-session
@@ -337,7 +337,7 @@
         (should (equal "running" (alist-get 'state running)))
         (should (eq :null (alist-get 'exit_code running)))
         (should (eq :null (alist-get 'duration_seconds running))))
-      (dolist (case '((0 nil "succeeded") (7 nil "failed") (-1 t "killed")))
+      (dolist (case '((0 nil "success") (7 nil "failure") (-1 t "killed")))
         (compilation-history--update-compilation-record id (car case) "out" (nth 1 case))
         (let ((reply (compilation-history-agent-test-get id)))
           (should (equal (nth 2 case) (alist-get 'state reply)))
@@ -404,7 +404,7 @@
       (compilation-history-agent-test-finished id)
       (compilation-history-agent-mode -1)
       (let ((reply (compilation-history-agent-test-get id)))
-        (should (equal "succeeded" (alist-get 'state reply)))
+        (should (equal "success" (alist-get 'state reply)))
         (should (string-match-p "recovered" (alist-get 'tail reply)))))))
 
 ;;; List
@@ -424,18 +424,22 @@
       (should (= 3 (alist-get 'total reply)))
       (should (equal '("20260903T120000000083" "20260903T120000000082" "20260903T120000000081")
                      (mapcar (lambda (r) (alist-get 'id r)) (alist-get 'records reply))))
-      (should (equal '("running" "failed" "succeeded")
+      (should (equal '("running" "failure" "success")
                      (mapcar (lambda (r) (alist-get 'state r)) (alist-get 'records reply))))
       (should-not (string-search "secret-out" (prin1-to-string reply))))
     (let ((reply (compilation-history-agent-test-request '(:op list :limit 1 :offset 1))))
       (should (= 3 (alist-get 'total reply)))
       (should (equal '("20260903T120000000082")
                      (mapcar (lambda (r) (alist-get 'id r)) (alist-get 'records reply)))))
-    (dolist (case '(("test" 2) ("compile_command:make" 2) ("ca" 1) ("secret-out" 2) ("nothing-matches" 0)))
+    (dolist (case '(("test" 2) ("compile_command:make" 2) ("ca" 1) ("secret-out" 2) ("nothing-matches" 0)
+                    ("state:failure" 1) ("state:running" 1) ("state:success make" 1) ("cargo state:success" 0)))
       (let ((reply (compilation-history-agent-test-request `(:op list :search ,(car case)))))
         (should (equal (car case) (alist-get 'search reply)))
         (should (= (nth 1 case) (alist-get 'total reply)))
-        (should (= (nth 1 case) (length (alist-get 'records reply))))))))
+        (should (= (nth 1 case) (length (alist-get 'records reply))))))
+    (should (equal "invalid_request"
+                   (alist-get 'error (compilation-history-agent-test-request
+                                      '(:op list :search "state:failed")))))))
 
 (ert-deftest agent-list-without-a-database-does-not-create-one ()
   (compilation-history-test-with-db
@@ -463,7 +467,7 @@
         (compilation-history-agent-mode -1)
         (let ((reply (compilation-history-agent-test-request
                       `(:op show :id ,id :select t))))
-          (should (equal "succeeded" (alist-get 'state reply)))
+          (should (equal "success" (alist-get 'state reply)))
           (should (eq t (alist-get 'selected (alist-get 'display reply))))
           (should (eq frame (selected-frame)))
           (should (eq buffer (window-buffer (selected-window)))))))
@@ -509,7 +513,7 @@
           (should (equal id (alist-get 'id shown)))
           (should (equal "display_unavailable" (alist-get 'error started)))
           (should (string-prefix-p "Compilation started" (alist-get 'message started)))
-          (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-finished
+          (should (equal "success" (alist-get 'state (compilation-history-agent-test-finished
                                                         (alist-get 'id started))))))))))
 
 (ert-deftest agent-show-reopens-a-closed-compilation-from-history ()
@@ -522,7 +526,7 @@
       (should-not (compilation-history-agent--find-buffer id))
       (let* ((reply (compilation-history-agent-test-request `(:op show :id ,id)))
              (buffer (get-buffer (alist-get 'buffer reply))))
-        (should (equal "failed" (alist-get 'state reply)))
+        (should (equal "failure" (alist-get 'state reply)))
         (should (eq t (alist-get 'visible (alist-get 'display reply))))
         (should (eq window (selected-window)))
         (should (eq buffer (compilation-history-agent--find-buffer id)))
@@ -543,8 +547,8 @@
 (ert-deftest agent-show-reports-reopened-history-buffers-with-their-terminal-state ()
   (compilation-history-agent-test-with-session
     (compilation-history--ensure-db)
-    (pcase-dolist (`(,id ,exit ,killed ,state) '(("20260903T120000000080" 0 nil "succeeded")
-                                                 ("20260903T120000000081" 7 nil "failed")
+    (pcase-dolist (`(,id ,exit ,killed ,state) '(("20260903T120000000080" 0 nil "success")
+                                                 ("20260903T120000000081" 7 nil "failure")
                                                  ("20260903T120000000082" -1 t "killed")))
       (compilation-history--insert-compilation-record
        (compilation-history-test--make-record :record-id id :buffer-name (format "*agent-reopened-%s*" id)

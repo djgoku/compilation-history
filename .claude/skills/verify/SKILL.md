@@ -112,7 +112,7 @@ not report (selected window, live buffers, DB rows). Use it only to observe,
 never to cause the behavior under test.
 
 Every CLI call prints one JSON object. Exit 0 means the protocol worked, not
-that the build passed: read `state` (`running`, `succeeded`, `failed`,
+that the build passed: read `state` (`running`, `success`, `failure`,
 `killed`) and `exit_code`. Protocol errors exit 1 with `error`, and with `id`
 plus `recovery` when a compilation ID is known.
 

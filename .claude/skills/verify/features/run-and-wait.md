@@ -6,8 +6,8 @@ An agent starts a build in the user's Emacs without moving their windows, gets i
 
 - `start-returns-id` returns `state: running`, the ID, command, directory and buffer.
 - `start-keeps-selection` leaves the selected window and buffer unchanged.
-- `wait-success` returns `succeeded`, `exit_code: 0` and the output tail.
-- `wait-failure` returns `failed` with the real exit code.
+- `wait-success` returns `success`, `exit_code: 0` and the output tail.
+- `wait-failure` returns `failure` with the real exit code.
 - `wait-repeat` returns an identical result when waited again.
 - `run-combined` starts then waits, printing only the final result.
 - `unicode` round-trips non-ASCII commands and output.
@@ -29,16 +29,16 @@ Preconditions:
 - **Selection baseline.** Run `$S/observe.sh '(buffer-name (window-buffer (selected-window)))' > "$VERIFY_EVIDENCE/selected-before"`.
 - **Start.** Run `id=$($S/capture.sh start-ok $S/cli.sh start --directory "$VERIFY_ROOT" --command "sleep 1; printf 'built-λ\n'" | jq -r .id)`. Exit 0; `.state == "running"`, `.command` is the command as given, and `.display.visible` and `.display.selected` are both false.
 - **Selection unchanged.** Run the selection baseline command again into `selected-after` and compare. The two files match.
-- **Wait.** Run `$S/capture.sh wait-ok $S/cli.sh wait "$id"`. It blocks about a second, then exits 0 with `.state == "succeeded"`, `.exit_code == 0` and `.tail` containing `built-λ`.
+- **Wait.** Run `$S/capture.sh wait-ok $S/cli.sh wait "$id"`. It blocks about a second, then exits 0 with `.state == "success"`, `.exit_code == 0` and `.tail` containing `built-λ`.
 - **Repeat.** Run `$S/capture.sh wait-again $S/cli.sh wait "$id"`. Output equals `wait-ok.out` except for `display`.
 - **Persisted.** Run `$S/capture.sh get-after-wait $S/cli.sh get "$id"`. `.state`, `.exit_code` and `.tail` match the wait result.
-- **Failure.** Run `$S/capture.sh run-fail $S/cli.sh run --directory "$VERIFY_ROOT" --command 'printf boom; exit 7'`. Exit 0; `.state == "failed"`, `.exit_code == 7`.
+- **Failure.** Run `$S/capture.sh run-fail $S/cli.sh run --directory "$VERIFY_ROOT" --command 'printf boom; exit 7'`. Exit 0; `.state == "failure"`, `.exit_code == 7`.
 - **Invalid UTF-8.** Run `$S/capture.sh run-raw $S/cli.sh run --directory "$VERIFY_ROOT" --command "printf 'raw\377byte'"`. Exit 0; `.tail` contains `raw�byte`.
 - **Relative directory.** Run `abs=$(cd "$S" && pwd)`, then `(cd "$VERIFY_ROOT/work" && "$abs/capture.sh" run-relative "$abs/cli.sh" run --directory . --command pwd)`. Exit 0; `.directory == "$VERIFY_ROOT/work/"` and `.tail` contains a line that is exactly `$VERIFY_ROOT/work`.
 - **Invalid input.** Run `$S/capture.sh run-bad-dir $S/cli.sh run --directory "$VERIFY_ROOT/nope" --command true`, `$S/capture.sh start-no-dir $S/cli.sh start --command true` and `$S/capture.sh start-blank $S/cli.sh start --directory "$VERIFY_ROOT" --command '   '`. Each exits 1 with `.error == "invalid_request"` and no `id`.
 
 ## Gotchas
 
-- CLI exit 0 with `state: failed` is correct: exit status reports the protocol, `state` reports the build.
+- CLI exit 0 with `state: failure` is correct: exit status reports the protocol, `state` reports the build.
 - `wait` asks `doctor` for the socket, then blocks on one socket connection. Do not poll with `get` instead.
 - The tail is the persisted output, which includes the `compilation-mode` header and footer lines.

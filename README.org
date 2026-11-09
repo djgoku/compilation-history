@@ -103,7 +103,7 @@ the interface never overrides it.
 
 Every response is one versioned JSON object (except =--help=). Exit status zero
 means successful protocol delivery, *not* necessarily a successful build. Inspect
-=state= (=running=, =succeeded=, =failed=, or =killed=) and =exit_code=. Protocol
+=state= (=running=, =success=, =failure=, or =killed=) and =exit_code=. Protocol
 and transport errors exit nonzero and may include a =get ID= recovery instruction.
 Never retry a start merely because display failed: its error includes the ID of
 the compilation that was already started.
@@ -125,7 +125,8 @@ fails.
 most 100) summaries from =--offset=: =id=, =state=, =exit_code=,
 =duration_seconds=, =start_time= in the recording machine's local time,
 =command=, =directory=, and =git_branch=. =--search= uses the history view's
-syntax, including =column:value=. Summaries omit output; use =get ID= for it.
+syntax, including =column:value= and =state:value=. Summaries omit output; use
+=get ID= for it.
 
 Wait results have the same shape as =get=: the final 4096 Unicode characters
 of persisted output plus a =tail_truncated= flag. =--full= substitutes =output=

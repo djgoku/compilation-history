@@ -62,8 +62,9 @@ indicates omitted earlier output.
 
 To find an earlier compilation the user refers to without an ID, run
 `compilation-history-agent list --search TEXT` (view search syntax, including
-`compile_command:make`; `--limit N`, default 20). Pick the ID from its
-summaries, then use `get ID` for output. Do not poll `list` for status.
+`compile_command:make` and `state:failure`; `--limit N`, default 20). Pick the
+ID from its summaries, then use `get ID` for output. Do not poll `list` for
+status.
 
 `get` is persisted history, not live status; it works with agent mode disabled.
 Its output can differ from the displayed tail. Completed wait results expire

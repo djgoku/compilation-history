@@ -78,21 +78,21 @@ check '.interface_enabled and .history_enabled and (.socket | startswith("/"))' 
 socket=$(jq -r '.socket' "$test_root/doctor")
 runtime=$(dirname "$socket")
 "${cli[@]}" run --directory "$test_root" --command "printf 'vertical-λ-🚀\\n'" > "$test_root/vertical"
-check '.state == "succeeded" and (.tail | contains("vertical-λ-🚀"))' "$test_root/vertical"
+check '.state == "success" and (.tail | contains("vertical-λ-🚀"))' "$test_root/vertical"
 vertical_id=$(jq -r '.id' "$test_root/vertical")
 "${cli[@]}" get "$vertical_id" > "$test_root/vertical-get"
 check '.exit_code == 0 and (.tail | contains("vertical-λ-🚀"))' "$test_root/vertical-get"
 printf 'PASS real CLI vertical slice\n'
 
 "${cli[@]}" list --search 'vertical-λ' --limit 5 > "$test_root/list"
-jq -e --arg id "$vertical_id" '.total == 1 and .records[0].id == $id and .records[0].state == "succeeded" and (.records[0] | has("tail") | not)' "$test_root/list" >/dev/null
+jq -e --arg id "$vertical_id" '.total == 1 and .records[0].id == $id and .records[0].state == "success" and (.records[0] | has("tail") | not)' "$test_root/list" >/dev/null
 "${cli[@]}" list --limit 1 > "$test_root/list-newest"
 check ".records[0].id == \"$vertical_id\" and (.records | length) == 1" "$test_root/list-newest"
 printf 'PASS real CLI list and search\n'
 
 mkdir "$test_root/relative-cwd"
 (cd "$test_root/relative-cwd" && "${cli[@]}" run --directory . --command pwd) > "$test_root/relative"
-check ".state == \"succeeded\" and .directory == \"$test_root/relative-cwd/\" and (.tail | contains(\"\n$test_root/relative-cwd\n\"))" "$test_root/relative"
+check ".state == \"success\" and .directory == \"$test_root/relative-cwd/\" and (.tail | contains(\"\n$test_root/relative-cwd\n\"))" "$test_root/relative"
 printf 'PASS relative --directory resolves against the shell directory\n'
 
 command_value=$'printf \'$HOME "λ" 🚀 \\\\ \'\n# $(touch SHOULD_NOT_EXIST)'
@@ -151,9 +151,9 @@ event client
 wait "$a_wait"; wait "$a_second"; wait "$c_wait"
 "${cli[@]}" wait "$b" > "$test_root/B-result"
 "${cli[@]}" wait "$b" > "$test_root/B-second"
-check '.state == "succeeded" and .exit_code == 0 and .tail_truncated and (.tail | contains("\nA-done\n")) and (.tail | contains("\nB-done\n") | not)' "$test_root/A-result"
-check '.state == "failed" and .exit_code == 7 and (.tail | contains("\nB-done\n"))' "$test_root/B-result"
-check '.state == "succeeded" and .exit_code == 0 and (.tail | contains("\nC-done\n"))' "$test_root/C-result"
+check '.state == "success" and .exit_code == 0 and .tail_truncated and (.tail | contains("\nA-done\n")) and (.tail | contains("\nB-done\n") | not)' "$test_root/A-result"
+check '.state == "failure" and .exit_code == 7 and (.tail | contains("\nB-done\n"))' "$test_root/B-result"
+check '.state == "success" and .exit_code == 0 and (.tail | contains("\nC-done\n"))' "$test_root/C-result"
 cmp "$test_root/A-result" "$test_root/A-second"
 cmp "$test_root/B-result" "$test_root/B-second"
 "${client[@]}" '(unless (cl-every (lambda (buffer) (not (local-variable-p (quote compilation-history-db-file) buffer))) (buffer-list)) (error "Buffer-local database override"))' >/dev/null
@@ -173,7 +173,7 @@ children=()
 "${cli[@]}" run --directory "$test_root" --command 'printf instant-three' > "$test_root/instant-three" & third=$!; children+=("$third")
 wait "$first"; wait "$second"; wait "$third"
 jq -e -s 'map(.id) | unique | length == 3' "$test_root/instant-one" "$test_root/instant-two" "$test_root/instant-three" >/dev/null
-for label in one two three; do check ".state == \"succeeded\" and (.tail | contains(\"instant-$label\"))" "$test_root/instant-$label"; done
+for label in one two three; do check ".state == \"success\" and (.tail | contains(\"instant-$label\"))" "$test_root/instant-$label"; done
 children=()
 printf 'PASS near-simultaneous instant clients\n'
 
@@ -186,7 +186,7 @@ event expired
 status=0; "${cli[@]}" wait "$expired_id" > "$test_root/expired" || status=$?
 [ "$status" -ne 0 ]; check '.error == "wait_unavailable"' "$test_root/expired"
 "${cli[@]}" get "$expired_id" > "$test_root/expired-get"
-check '.state == "succeeded" and (.tail | contains("expiry-kept"))' "$test_root/expired-get"
+check '.state == "success" and (.tail | contains("expiry-kept"))' "$test_root/expired-get"
 "${cli[@]}" show "$expired_id" > "$test_root/expired-show"
 check '.display.visible' "$test_root/expired-show"
 "${cli[@]}" doctor > "$test_root/second-doctor"
@@ -204,7 +204,7 @@ status=0; wait "$disabled_wait" || status=$?
 [ ! -d "$runtime" ]
 event finished
 "${cli[@]}" get "$disable_id" > "$test_root/disable-get"
-check '.state == "succeeded" and (.tail | contains("disable-survived"))' "$test_root/disable-get"
+check '.state == "success" and (.tail | contains("disable-survived"))' "$test_root/disable-get"
 "${cli[@]}" show "$disable_id" > "$test_root/disable-show" || { cat "$test_root/disable-show" >&2; exit 1; }
 check '.display.visible' "$test_root/disable-show"
 "${client[@]}" '(unless (and (= 0 (hash-table-count compilation-history-agent--jobs)) (not compilation-history-agent--runtime-directory)) (error "Interface resources survived disable"))' >/dev/null

@@ -106,13 +106,6 @@ With ID, include it and the `get' command that recovers its history."
                       t :false))
       (selected . ,(if (memq (selected-window) windows) t :false)))))
 
-(defun compilation-history-agent--state (exit-code killed finished)
-  "Name the state for EXIT-CODE, KILLED and FINISHED."
-  (cond (killed "killed")
-        ((not finished) "running")
-        ((eql exit-code 0) "succeeded")
-        (t "failed")))
-
 (defun compilation-history-agent--validate-id (id)
   "Reject ID unless it is a canonical history timestamp."
   (unless (and (stringp id)
@@ -345,58 +338,67 @@ Non-nil DISPLAY shows the buffer on the selected frame."
 
 ;;; Persisted recovery and explicit display
 
+(defun compilation-history-agent--summary (record)
+  "Return the reply fields `get' and `list' share for RECORD.
+RECORD is a `compilation-history-view--row-to-plist' plist.  State names
+are the history view's, so they work in a state: search."
+  (let* ((state (plist-get record :status))
+         (running (equal state "running")))
+    `((id . ,(plist-get record :id)) (state . ,state)
+      (exit_code . ,(if running :null (or (plist-get record :exit-code) :null)))
+      (duration_seconds . ,(if running :null (or (plist-get record :duration) :null)))
+      (command . ,(plist-get record :command)) (directory . ,(plist-get record :directory)))))
+
 (defun compilation-history-agent-get (id &optional full)
   "Return persisted history for ID, with complete output when FULL is non-nil."
   (condition-case err
       (if (not (file-exists-p compilation-history-db-file))
           (compilation-history-agent--error-reply "history_unavailable" "History database does not exist")
-        (pcase (compilation-history--get-record id)
-          ('nil (compilation-history-agent--error-reply "unknown_id" "No persisted record for this ID"))
-          (`(,_ ,buffer ,command ,directory ,_start ,end ,exit ,killed ,_ ,_ ,_ ,duration)
-           (let* ((output (or (compilation-history--get-output id) ""))
-                  (state (compilation-history-agent--state exit (eql killed 1) end))
-                  (running (equal state "running")))
-             (append
-              `((protocol_version . 1) (id . ,id) (state . ,state)
-                (exit_code . ,(if running :null (or exit :null)))
-                (duration_seconds . ,(if running :null (or duration :null)))
-                (command . ,command) (directory . ,directory) (buffer . ,buffer))
-              (if full
-                  `((output . ,(compilation-history-agent--sanitize output)))
-                (compilation-history-agent--tail output)))))))
+        (if-let* ((row (compilation-history--get-record id)))
+            (let ((record (compilation-history-view--row-to-plist row))
+                  (output (or (compilation-history--get-output id) "")))
+              (append
+               '((protocol_version . 1))
+               (compilation-history-agent--summary record)
+               `((buffer . ,(plist-get record :buffer-name)))
+               (if full
+                   `((output . ,(compilation-history-agent--sanitize output)))
+                 (compilation-history-agent--tail output))))
+          (compilation-history-agent--error-reply "unknown_id" "No persisted record for this ID")))
     (error (compilation-history-agent--error-reply "history_unavailable" (error-message-string err)))))
 
 (defun compilation-history-agent-list (&optional search limit offset)
   "Return up to LIMIT persisted records newest first, skipping OFFSET.
-Non-nil SEARCH filters them as the history view's search does.  Records
-carry no output; `get' reads it."
-  (let ((limit (or limit compilation-history-agent-list-default-limit))
-        (offset (or offset 0)))
+Non-nil SEARCH filters them as the history view's search does, including
+state:VALUE.  Records carry no output; `get' reads it."
+  (let* ((limit (or limit compilation-history-agent-list-default-limit))
+         (offset (or offset 0))
+         (parsed (when search
+                   (condition-case err
+                       (compilation-history--parse-search search)
+                     (user-error (compilation-history-agent--invalid (error-message-string err))))))
+         (text (car parsed))
+         (state (cdr parsed)))
     (condition-case err
         (if (not (file-exists-p compilation-history-db-file))
             (compilation-history-agent--error-reply "history_unavailable" "History database does not exist")
           `((protocol_version . 1)
             (search . ,(or search :null))
-            (total . ,(if search
-                          (compilation-history--count-records-fts search)
-                        (compilation-history--count-records)))
+            (total . ,(if text
+                          (compilation-history--count-records-fts text state)
+                        (compilation-history--count-records state)))
             (offset . ,offset)
             (records
              . ,(vconcat
                  (mapcar
-                  (pcase-lambda (`(,id ,_buffer ,command ,directory ,start ,end ,exit ,killed
-                                       ,branch ,_ ,_ ,duration))
-                    (let* ((state (compilation-history-agent--state exit (eql killed 1) end))
-                           (running (equal state "running")))
-                      `((id . ,id) (state . ,state)
-                        (exit_code . ,(if running :null (or exit :null)))
-                        (duration_seconds . ,(if running :null (or duration :null)))
-                        (start_time . ,start)
-                        (command . ,command) (directory . ,directory)
-                        (git_branch . ,(or branch :null)))))
-                  (if search
-                      (compilation-history--query-page-fts limit offset search)
-                    (compilation-history--query-page limit offset)))))))
+                  (lambda (row)
+                    (let ((record (compilation-history-view--row-to-plist row)))
+                      (append (compilation-history-agent--summary record)
+                              `((start_time . ,(plist-get record :start-time))
+                                (git_branch . ,(or (plist-get record :branch) :null))))))
+                  (if text
+                      (compilation-history--query-page-fts limit offset text state)
+                    (compilation-history--query-page limit offset state)))))))
       (error (compilation-history-agent--error-reply "history_unavailable" (error-message-string err))))))
 
 (defun compilation-history-agent--find-buffer (id)

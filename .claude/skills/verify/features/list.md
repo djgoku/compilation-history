@@ -7,6 +7,7 @@
 - `list-newest-first` orders records by start time, then ID, newest first, and reports each record's state.
 - `list-page` honors `--limit` and `--offset` while `total` stays the full count.
 - `list-search` filters by a plain term, a `column:value` term, or a term under 3 characters.
+- `list-state` filters by `state:VALUE`, alone or with other search text, using the same state names the records report; an unknown state is `invalid_request`.
 - `list-no-output` omits output from every record.
 - `list-invalid` rejects an empty search, a limit outside 1 to 100, and flags from other commands.
 - `list-interface-off` works while the interface is disabled.
@@ -22,10 +23,11 @@ Preconditions:
 - A launched server and `DOCTOR OK`.
 
 - **Records.** Run `a=$($S/cli.sh run --directory "$VERIFY_ROOT" --command 'echo LIST-A' | jq -r .id)`, then `b=$($S/cli.sh run --directory "$VERIFY_ROOT" --command 'echo LIST-B; exit 4' | jq -r .id)`.
-- **Newest first.** Run `$S/capture.sh list-all $S/cli.sh list`. `.total == 2`, `[.records[].id] == [$b, $a]`, `[.records[].state] == ["failed", "succeeded"]`, `.search == null`.
+- **Newest first.** Run `$S/capture.sh list-all $S/cli.sh list`. `.total == 2`, `[.records[].id] == [$b, $a]`, `[.records[].state] == ["failure", "success"]`, `.search == null`.
 - **No output.** Run `jq -e '[.records[] | has("tail") or has("output")] | any | not' "$VERIFY_EVIDENCE/list-all.out"`.
 - **Page.** Run `$S/capture.sh list-page $S/cli.sh list --limit 1 --offset 1`. `.total == 2`, `.offset == 1`, and the only record is `$a`.
 - **Search.** Run `$S/capture.sh list-search $S/cli.sh list --search 'compile_command:LIST-B'`. `.total == 1` and the record is `$b`. Then `$S/capture.sh list-short $S/cli.sh list --search 'B;'`, which takes the under-3-character path and also returns only `$b`.
+- **State.** Run `$S/capture.sh list-state $S/cli.sh list --search 'state:failure'`. `.total == 1` and the record is `$b`. Then `$S/capture.sh list-state-text $S/cli.sh list --search 'state:success LIST'`, which returns only `$a`, and `$S/capture.sh list-state-bad $S/cli.sh list --search 'state:failed'`, which exits 1 with `.error == "invalid_request"`.
 - **Invalid.** Run `$S/capture.sh list-bad-limit $S/cli.sh list --limit 101` `$S/capture.sh list-bad-flag $S/cli.sh list --full` and `$S/capture.sh list-empty $S/cli.sh list --search ''`. Each exits 1 with `.error == "invalid_request"`.
 - **Interface off.** Run `$S/observe.sh '(compilation-history-agent-mode -1)'`, then `$S/capture.sh list-off $S/cli.sh list`. Exit 0 with `.total == 2`. Restore with `$S/observe.sh '(compilation-history-agent-mode 1)'`.
 
