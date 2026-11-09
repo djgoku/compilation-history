@@ -607,6 +607,153 @@
                                     (buffer-substring-no-properties (point-min) (point-max)))))
         (kill-buffer buf)))))
 
+;;; Mirror tests
+
+(defconst compilation-history-test--mirror-id "20260321T120000000001")
+
+(defun compilation-history-test--save-elsewhere (output)
+  "Save OUTPUT for the record another Emacs is running."
+  (compilation-history--execute-sql
+   "UPDATE compilations SET output = ? WHERE id = ?"
+   (vector output compilation-history-test--mirror-id)))
+
+(defun compilation-history-test--running-elsewhere (output)
+  "Insert a running record with OUTPUT and return its view plist.
+No buffer for it exists here, as when another Emacs runs it."
+  (compilation-history--insert-compilation-record
+   (compilation-history-test--make-record
+    :record-id compilation-history-test--mirror-id))
+  (compilation-history-test--save-elsewhere output)
+  (list :id compilation-history-test--mirror-id
+        :buffer-name "*compilation-history-20260321T120000000001==elsewhere*"
+        :command "make test"
+        :directory "/tmp/"
+        :status "running"))
+
+(defmacro compilation-history-test-with-mirror (output &rest body)
+  "Run BODY in the buffer opened for a record running elsewhere with OUTPUT.
+The view plist is bound to `record'."
+  (declare (indent 1) (debug t))
+  `(compilation-history-test-with-db
+     (compilation-history--ensure-db)
+     (let* ((record (compilation-history-test--running-elsewhere ,output))
+            (buf (compilation-history-view--get-or-create-compilation-buffer record)))
+       (ignore record)
+       (unwind-protect
+           (with-current-buffer buf ,@body)
+         (kill-buffer buf)))))
+
+(defun compilation-history-test--press-g ()
+  "Run the command bound to g in the current buffer."
+  (call-interactively (key-binding "g")))
+
+(ert-deftest test-mirror-header-says-running-elsewhere ()
+  "A mirror's header says it runs in another Emacs, auto-refreshes, and what g does."
+  (compilation-history-test-with-mirror "building..."
+    (should (string-match-p "another Emacs" header-line-format))
+    (should (string-match-p "auto-refreshing" header-line-format))
+    (should (string-match-p "g refreshes until it finishes" header-line-format))))
+
+(ert-deftest test-open-finished-record-has-no-mirror-header ()
+  "Opening a finished compilation shows no mirror header."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record :record-id "20260321T120000000001"))
+    (compilation-history--update-compilation-record
+     "20260321T120000000001" 0 "done" nil)
+    (let ((buf (compilation-history-view--get-or-create-compilation-buffer
+                (list :id "20260321T120000000001"
+                      :buffer-name "*compilation-history-20260321T120000000001==done*"
+                      :command "make test"
+                      :directory "/tmp/"
+                      :status "success"))))
+      (unwind-protect
+          (with-current-buffer buf
+            (should-not header-line-format))
+        (kill-buffer buf)))))
+
+(ert-deftest test-mirror-g-loads-new-output-once ()
+  "Pressing g in a mirror appends only output saved since the last load."
+  (compilation-history-test-with-mirror "step 1\n"
+    (compilation-history-test--save-elsewhere "step 1\nstep 2\n")
+    (compilation-history-test--press-g)
+    (should (equal "step 1\nstep 2\n" (buffer-string)))
+    (compilation-history-test--press-g)
+    (should (equal "step 1\nstep 2\n" (buffer-string)))))
+
+(ert-deftest test-mirror-refresh-follows-output-only-from-the-end ()
+  "A refresh moves point to new output only when point was at the end."
+  (compilation-history-test-with-mirror "step 1\n"
+    (goto-char (point-max))
+    (compilation-history-test--save-elsewhere "step 1\nstep 2\n")
+    (compilation-history-test--press-g)
+    (should (= (point) (point-max)))
+    (goto-char (point-min))
+    (compilation-history-test--save-elsewhere "step 1\nstep 2\nstep 3\n")
+    (compilation-history-test--press-g)
+    (should (= (point) (point-min)))))
+
+(ert-deftest test-mirror-finish-loads-final-output-and-g-recompiles ()
+  "When the other Emacs finishes, the mirror shows the end and g reruns the build."
+  (compilation-history-test-with-mirror "step 1\n"
+    (compilation-history--update-compilation-record
+     compilation-history-test--mirror-id 0
+     "step 1\nCompilation finished\n" nil)
+    (compilation-history-test--press-g)
+    (should (string-match-p "Compilation finished" (buffer-string)))
+    (should (string-match-p "Finished in another Emacs" header-line-format))
+    (should (eq (key-binding "g") #'recompile))))
+
+(ert-deftest test-mirror-auto-refreshes-while-visible ()
+  "A visible mirror picks up new output without pressing g."
+  (let ((compilation-history-view-mirror-refresh-interval 0.1))
+    (compilation-history-test-with-mirror "step 1\n"
+      (set-window-buffer (selected-window) (current-buffer))
+      (compilation-history-test--save-elsewhere "step 1\nstep 2\n")
+      (with-timeout (5 nil)
+        (while (not (string-match-p "step 2" (buffer-string)))
+          (accept-process-output nil 0.05)))
+      (should (equal "step 1\nstep 2\n" (buffer-string))))))
+
+(ert-deftest test-reopen-mirror-shows-new-output ()
+  "Reopening a mirror reuses its buffer and shows the latest output."
+  (compilation-history-test-with-mirror "step 1\n"
+    (compilation-history-test--save-elsewhere "step 1\nstep 2\n")
+    (should (eq (current-buffer)
+                (compilation-history-view--get-or-create-compilation-buffer record)))
+    (should (equal "step 1\nstep 2\n" (buffer-string)))))
+
+(ert-deftest test-recompile-in-running-mirror-asks-first ()
+  "Recompiling a mirror whose build still runs elsewhere asks before a second run."
+  (compilation-history-test-with-mirror "step 1\n"
+    (let ((asked nil)
+          (was-on compilation-history-mode))
+      (compilation-history-mode 1)
+      (unwind-protect
+          (cl-letf (((symbol-function 'y-or-n-p)
+                     (lambda (prompt) (setq asked prompt) nil)))
+            (should-error (recompile) :type 'user-error)
+            (should (string-match-p "another Emacs" asked))
+            (should-not compilation-in-progress))
+        (unless was-on (compilation-history-mode -1))))))
+
+(ert-deftest test-open-running-here-reuses-live-buffer ()
+  "Opening a compilation running in this Emacs returns its own buffer untouched."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let* ((record (compilation-history-test--running-elsewhere "saved"))
+           (live (get-buffer-create (plist-get record :buffer-name))))
+      (unwind-protect
+          (progn
+            (with-current-buffer live (insert "live output"))
+            (should (eq live (compilation-history-view--get-or-create-compilation-buffer
+                              record)))
+            (with-current-buffer live
+              (should (equal "live output" (buffer-string)))
+              (should-not header-line-format)))
+        (kill-buffer live)))))
+
 (ert-deftest test-reopened-buffer-renders-ansi-colors ()
   "Reopened compilation buffer renders ANSI escape codes as face properties."
   (compilation-history-test-with-db
