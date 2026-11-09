@@ -183,7 +183,9 @@ the agent module.
   frame when they can, otherwise use another window of the selected frame.
   `display_unavailable` means none of those worked, for example an
   unsplittable frame with no other window; treat it as a finding.
-- Builds run with the **server's** environment and `default-directory`, not
-  your shell's. Always pass `--directory "$VERIFY_ROOT"` or a subdirectory.
+- Builds run with the **server's** environment, not your shell's. The CLI
+  resolves a relative `--directory` against your shell's directory, so pass
+  `--directory "$VERIFY_ROOT"` or a subdirectory: these recipes run from the
+  repo root, not from the disposable root.
 - Each `cli.sh` call that needs an ID takes it from an earlier reply. Keep IDs
   from `start` replies; never re-run `start` to get one.

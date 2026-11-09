@@ -13,6 +13,7 @@ An agent starts a build in the user's Emacs without moving their windows, gets i
 - `unicode` round-trips non-ASCII commands and output.
 - `invalid-utf8` reports non-UTF-8 output bytes as U+FFFD instead of failing.
 - `start-invalid` rejects a missing option, a missing directory or a blank command with `invalid_request` and no `id`.
+- `start-relative-directory` resolves a relative `--directory` against the shell's directory, not the Emacs server's.
 
 ## How to get to it (user POV)
 
@@ -33,6 +34,7 @@ Preconditions:
 - **Persisted.** Run `$S/capture.sh get-after-wait $S/cli.sh get "$id"`. `.state`, `.exit_code` and `.tail` match the wait result.
 - **Failure.** Run `$S/capture.sh run-fail $S/cli.sh run --directory "$VERIFY_ROOT" --command 'printf boom; exit 7'`. Exit 0; `.state == "failed"`, `.exit_code == 7`.
 - **Invalid UTF-8.** Run `$S/capture.sh run-raw $S/cli.sh run --directory "$VERIFY_ROOT" --command "printf 'raw\377byte'"`. Exit 0; `.tail` contains `raw�byte`.
+- **Relative directory.** Run `abs=$(cd "$S" && pwd)`, then `(cd "$VERIFY_ROOT/work" && "$abs/capture.sh" run-relative "$abs/cli.sh" run --directory . --command pwd)`. Exit 0; `.directory == "$VERIFY_ROOT/work/"` and `.tail` contains a line that is exactly `$VERIFY_ROOT/work`.
 - **Invalid input.** Run `$S/capture.sh run-bad-dir $S/cli.sh run --directory "$VERIFY_ROOT/nope" --command true`, `$S/capture.sh start-no-dir $S/cli.sh start --command true` and `$S/capture.sh start-blank $S/cli.sh start --directory "$VERIFY_ROOT" --command '   '`. Each exits 1 with `.error == "invalid_request"` and no `id`.
 
 ## Gotchas

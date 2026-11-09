@@ -1,6 +1,6 @@
 # Show a compilation
 
-`show` displays a compilation's buffer on the selected Emacs frame without selecting it, unless `--select` is given. When the buffer was closed, it first recreates it from the saved record and output, as `RET` in the history view does. `start --display` and `run --display` do the same at start. A `show` reply holds only `protocol_version`, `id`, `state`, `buffer` and `display`, so `get` has the outcome. `start --display` adds `command` and `directory`, as any `start` reply does, and `run --display` returns the full `get` result plus `display`. Nothing raises a frame or requests OS focus.
+`show` displays a compilation's buffer on the selected Emacs frame without selecting it, unless `--select` is given. When the buffer was closed, it first recreates it from the saved record and output, as `RET` in the history view does. `start --display` and `run --display` do the same at start. A `show` reply holds only `protocol_version`, `id`, `state`, `buffer` and `display`, so `get` has the outcome. Its `state` is the saved state, the one `get` and `list` report. `start --display` adds `command` and `directory`, as any `start` reply does, and `run --display` returns the full `get` result plus `display`. Nothing raises a frame or requests OS focus.
 
 ## Sub-features
 
@@ -10,6 +10,7 @@
 - `show-split-frame` uses the other window when the frame is already split and cannot split again.
 - `show-reopen` recreates a closed compilation's buffer from history, read-only with its saved output, then shows it.
 - `show-unknown` returns `unknown_id` with recovery when neither a live buffer nor a history record has that ID.
+- `show-state-matches-get` reports the saved state even when the buffer's in-memory record differs, as after `compilation-history-mode` is turned off mid-run.
 
 ## How to get to it (user POV)
 
@@ -28,6 +29,7 @@ Preconditions:
 - **Display at start.** Run `$S/capture.sh start-display $S/cli.sh start --directory "$VERIFY_ROOT" --command 'sleep 1; printf at-start' --display`. `.state == "running"`, `.display.visible == true`, `.display.selected == false`. Then `wait` its ID. `run --display` would report the display at completion instead.
 - **Split frame.** After the steps above, `$S/observe.sh '(length (window-list))'` is `2`. Run another `cli.sh run ... --display`. The window count stays `2`; no `error`; `.display.visible == true`, `.display.selected == false`, and the selected window's buffer is unchanged.
 - **Reopen.** Run `oid=$($S/cli.sh run --directory "$VERIFY_ROOT" --command "printf 'old-build-marker\n'; exit 2" | jq -r .id)`, then close its buffer with `$S/observe.sh "(let ((kill-buffer-query-functions nil)) (kill-buffer (compilation-history-agent--find-buffer \"$oid\")))"`. `$S/capture.sh show-reopen $S/cli.sh show "$oid"` reports `.state == "failed"`, `.display.visible == true` and `.display.selected == false`. In a `--tui` launch the screen shows `old-build-marker` and `exited abnormally with code 2`. A second `show` reuses that buffer: `observe.sh` finds one buffer whose name contains `$oid`. `g` in it recompiles as a new record.
+- **State matches get.** Run `mid=$($S/cli.sh start --directory "$VERIFY_ROOT" --command 'sleep 2; exit 4' | jq -r .id)`, then `$S/observe.sh '(compilation-history-mode -1)'` while it runs, then `$S/cli.sh wait "$mid"`. `$S/capture.sh show-mode-off $S/cli.sh show "$mid"` and `$S/capture.sh get-mode-off $S/cli.sh get "$mid"` report the same `.state`. Restore with `$S/observe.sh '(compilation-history-mode 1)'`.
 - **Unknown.** Run `$S/capture.sh show-unknown $S/cli.sh show 20000101T000000000000`. Exit 1; `.error == "unknown_id"` and `.recovery` present.
 
 ## Gotchas
