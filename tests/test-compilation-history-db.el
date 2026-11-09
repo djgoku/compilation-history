@@ -372,5 +372,50 @@
           (should (equal newest-first
                          (mapcar #'car (compilation-history--query-page-fts 10 0 term)))))))))
 
+;;; State filter tests
+
+(defun compilation-history-test--insert-one-per-state ()
+  "Insert one record in each state, each running a different make target.
+Returns an alist of (STATE . RECORD-ID)."
+  (let ((states '(("running" "20261109T120000000001" nil nil)
+                  ("success" "20261109T120000000002" 0 nil)
+                  ("failure" "20261109T120000000003" 2 nil)
+                  ("killed"  "20261109T120000000004" 9 t))))
+    (pcase-dolist (`(,state ,id ,exit-code ,killed) states)
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record
+        :record-id id
+        :command (format "make %s" state)))
+      (when exit-code
+        (compilation-history--update-compilation-record id exit-code "output" killed)))
+    (mapcar (lambda (s) (cons (nth 0 s) (nth 1 s))) states)))
+
+(ert-deftest test-compilation-history--query-page-state-filter ()
+  "Page and count queries return only records in the requested state."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (pcase-dolist (`(,state . ,id) (compilation-history-test--insert-one-per-state))
+      (should (= (compilation-history--count-records state) 1))
+      (should (equal (list id)
+                     (mapcar #'car (compilation-history--query-page 10 0 state)))))
+    (should (= (compilation-history--count-records) 4))
+    (should (= (length (compilation-history--query-page 10 0)) 4))))
+
+(ert-deftest test-compilation-history--search-with-state-filter ()
+  "A state filter narrows search results on both the FTS and LIKE paths."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (let ((running-id (cdr (assoc "running" (compilation-history-test--insert-one-per-state)))))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record
+        :record-id "20261109T120000000005"
+        :command "npm run build"))
+      ;; "make" uses FTS, "ma" (under 3 chars) uses LIKE
+      (dolist (term '("make" "ma"))
+        (should (= (compilation-history--count-records-fts term "running") 1))
+        (should (equal (list running-id)
+                       (mapcar #'car (compilation-history--query-page-fts 10 0 term "running"))))
+        (should (= (compilation-history--count-records-fts term) 4))))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here
