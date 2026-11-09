@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Remove byte-compiled files so stale .elc never shadows the sources"
+set -euo pipefail
+
+PROJECT="${MISE_PROJECT_DIR:-.}"
+
+rm -f "$PROJECT"/*.elc "$PROJECT"/tests/*.elc
