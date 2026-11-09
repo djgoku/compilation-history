@@ -66,6 +66,16 @@ Subtracts space for header-line and pagination controls."
                  (const :tag "Vertical (side-by-side)" vertical))
   :group 'compilation-history)
 
+(defcustom compilation-history-view-mirror-refresh-interval 2
+  "Seconds between reloads of a mirror's output while it is visible.
+A mirror shows a compilation running in another Emacs.  That Emacs
+saves output only every `compilation-history-save-interval' seconds
+or `compilation-history-save-line-threshold' lines, so a shorter
+interval than that adds no new output, only database reads."
+  :type 'number
+  :group 'compilation-history
+  :package-version '(compilation-history . "0.2.12"))
+
 (defcustom compilation-history-view-columns
   '((:name "#" :key :row-number)
     (:name "Start Time" :key :start-time)
@@ -118,6 +128,12 @@ so column order does not affect data access."
 
 (defvar-local compilation-history-view--prev-window-config nil
   "Window configuration saved before opening the view in full frame.")
+
+(defvar-local compilation-history-view--mirror-length 0
+  "Characters of saved output this mirror has loaded.")
+
+(defvar-local compilation-history-view--mirror-timer nil
+  "Timer reloading this mirror's output.")
 
 ;;; Default Formatters
 
@@ -467,38 +483,122 @@ When DISABLED is non-nil, button is dimmed and non-interactive."
 
 (defun compilation-history-view--get-or-create-compilation-buffer (record)
   "Get or create the compilation buffer for RECORD.
-Reuses existing buffer if still alive, otherwise creates from database."
+Reuses existing buffer if still alive, otherwise creates from database.
+A record still running with no buffer here runs in another Emacs, so
+its buffer is a mirror; see `compilation-history-view-mirror-mode'."
   (let* ((buf-name (plist-get record :buffer-name))
          (id (plist-get record :id))
          (existing (get-buffer buf-name)))
-    (or existing
-        (let ((output (compilation-history--get-output id))
-              (buf (get-buffer-create buf-name))
-              (dir (plist-get record :directory))
-              (cmd (plist-get record :command))
-              (comint-flag (and (plist-get record :comint)
-                                (not (zerop (plist-get record :comint))))))
-          (with-current-buffer buf
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (when output (insert output)))
-            (setq default-directory dir)
-            (compilation-mode)
-            (font-lock-mode -1)
-            (let ((inhibit-read-only t))
-              (ansi-color-apply-on-region (point-min) (point-max)))
-            (setq-local compile-command cmd)
-            (setq-local compilation-directory dir)
-            (setq-local compilation-arguments (list cmd (when comint-flag t) nil nil))
-            (setq-local compilation-history-record
-                        (make-compilation-history
-                         :record-id id
-                         :command cmd
-                         :buffer-name buf-name
-                         :compile-directory dir
-                         :comint comint-flag))
-            (compilation-history-buffer-mode 1))
-          buf))))
+    (cond
+     ((and existing
+           (buffer-local-value 'compilation-history-view-mirror-mode existing))
+      (with-current-buffer existing
+        (compilation-history-view-mirror-refresh))
+      existing)
+     (existing existing)
+     (t
+      (pcase-let ((`(,output ,running) (compilation-history--output-since id 0))
+                  (buf (get-buffer-create buf-name))
+                  (dir (plist-get record :directory))
+                  (cmd (plist-get record :command))
+                  (comint-flag (and (plist-get record :comint)
+                                    (not (zerop (plist-get record :comint))))))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (when output (insert output)))
+          (setq default-directory dir)
+          (compilation-mode)
+          (font-lock-mode -1)
+          (let ((inhibit-read-only t))
+            (ansi-color-apply-on-region (point-min) (point-max)))
+          (setq-local compile-command cmd)
+          (setq-local compilation-directory dir)
+          (setq-local compilation-arguments (list cmd (when comint-flag t) nil nil))
+          (setq-local compilation-history-record
+                      (make-compilation-history
+                       :record-id id
+                       :command cmd
+                       :buffer-name buf-name
+                       :compile-directory dir
+                       :comint comint-flag))
+          (compilation-history-buffer-mode 1)
+          (when running
+            (setq compilation-history-view--mirror-length (length output))
+            (compilation-history-view-mirror-mode 1)))
+        buf)))))
+
+;;; Mirror
+
+(defun compilation-history-view--mirror-stop-timer ()
+  "Cancel the timer reloading this mirror's output."
+  (when (timerp compilation-history-view--mirror-timer)
+    (cancel-timer compilation-history-view--mirror-timer))
+  (setq compilation-history-view--mirror-timer nil))
+
+(defun compilation-history-view--mirror-set-header ()
+  "Show in the header line that this mirror's build is running elsewhere."
+  (setq header-line-format
+        (propertize
+         (format "Running in another Emacs, auto-refreshing.  g refreshes until it finishes.  Updated %s"
+                 (format-time-string "%T"))
+         'face 'warning)))
+
+(define-minor-mode compilation-history-view-mirror-mode
+  "Minor mode for a mirror: a compilation another Emacs is running.
+While the mirror shows in a window, its output reloads from the
+database every `compilation-history-view-mirror-refresh-interval' seconds.
+\\[compilation-history-view-mirror-refresh] reloads it now.  When the
+run finishes, the mode turns itself off and \\`g' reruns the build."
+  :lighter " Mirror"
+  :keymap (define-keymap "g" #'compilation-history-view-mirror-refresh)
+  (compilation-history-view--mirror-stop-timer)
+  (if compilation-history-view-mirror-mode
+      (let ((buf (current-buffer)))
+        (compilation-history-view--mirror-set-header)
+        (add-hook 'kill-buffer-hook #'compilation-history-view--mirror-stop-timer nil t)
+        (setq compilation-history-view--mirror-timer
+              (run-with-timer compilation-history-view-mirror-refresh-interval
+                              compilation-history-view-mirror-refresh-interval
+                              (lambda ()
+                                (when (get-buffer-window buf t)
+                                  (with-current-buffer buf
+                                    (compilation-history-view-mirror-refresh)))))))
+    (remove-hook 'kill-buffer-hook #'compilation-history-view--mirror-stop-timer t)))
+
+(defun compilation-history-view--mirror-append (text)
+  "Append TEXT to this mirror, following it from windows at the end."
+  (let ((inhibit-read-only t)
+        (at-end (= (point) (point-max)))
+        (windows-at-end (seq-filter (lambda (win) (= (window-point win) (point-max)))
+                                    (get-buffer-window-list nil nil t))))
+    (save-excursion
+      (goto-char (point-max))
+      (let ((start (point)))
+        (insert text)
+        (ansi-color-apply-on-region start (point))))
+    (cl-incf compilation-history-view--mirror-length (length text))
+    (when at-end
+      (goto-char (point-max)))
+    (dolist (win windows-at-end)
+      (set-window-point win (point-max)))))
+
+(defun compilation-history-view-mirror-refresh ()
+  "Load the output the other Emacs saved since the last load.
+Once its run has finished, load the rest and stop mirroring."
+  (interactive)
+  (pcase-let ((`(,text ,running)
+               (compilation-history--output-since
+                (compilation-history-record-id compilation-history-record)
+                compilation-history-view--mirror-length)))
+    (when (and text (not (string-empty-p text)))
+      (compilation-history-view--mirror-append text)
+      (when running
+        (compilation-history-view--mirror-set-header)))
+    (unless running
+      (compilation-history-view-mirror-mode -1)
+      (setq header-line-format
+            "Finished in another Emacs.  g now reruns the build here."))))
 
 (defun compilation-history-view--display-action ()
   "Return a `display-buffer' action for the view split."

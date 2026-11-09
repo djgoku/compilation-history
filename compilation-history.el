@@ -63,6 +63,14 @@
   :type 'file
   :group 'compilation-history)
 
+(defcustom compilation-history-db-busy-timeout 2000
+  "Milliseconds to wait for another Emacs to release the database lock.
+Emacs is blocked while it waits.  When the wait runs out, a write
+signals `sqlite-locked-error'."
+  :type 'natnum
+  :group 'compilation-history
+  :package-version '(compilation-history . "0.2.12"))
+
 (defcustom compilation-history-command-truncate-length 25
   "The length to truncate the compile command to in the buffer name."
   :type 'integer
@@ -307,6 +315,8 @@ without referencing the handle directly."
          (let ((,db-sym compilation-history--db))
            ,@body)
        (let ((,db-sym (sqlite-open compilation-history-db-file)))
+         (sqlite-pragma ,db-sym (format "busy_timeout = %d"
+                                        compilation-history-db-busy-timeout))
          (let ((compilation-history--db ,db-sym))
            (unwind-protect
                (progn ,@body)
@@ -320,11 +330,13 @@ without referencing the handle directly."
 (defun compilation-history--ensure-db ()
   "Ensure the compilation history database exists and is initialized.
 Creates the main table, FTS5 virtual table, and sync triggers
-if they don't exist."
+if they don't exist.  Puts the database in WAL mode, so reading
+history never waits for another Emacs that is saving output."
   (let ((db-dir (file-name-directory compilation-history-db-file)))
     (unless (file-directory-p db-dir)
       (make-directory db-dir t))
     (compilation-history--with-db db
+      (sqlite-pragma db "journal_mode = WAL")
       (sqlite-execute db compilation-history-db-schema)
       (sqlite-execute db compilation-history-db-fts-schema)
       (dolist (trigger compilation-history-db-fts-triggers)
@@ -447,6 +459,19 @@ Each row includes a computed duration_seconds column appended at the end."
     (caar (sqlite-select db
                          "SELECT output FROM compilations WHERE id = ?"
                          (vector id)))))
+
+(defun compilation-history--output-since (id start)
+  "Return (TEXT RUNNING) for compilation record ID.
+TEXT is the saved output after its first START characters, or nil
+when there is none.  RUNNING is non-nil while the record has not
+finished."
+  (compilation-history--with-db db
+    (pcase (car (sqlite-select
+                 db
+                 (format "SELECT substr(output, ?), %s FROM compilations WHERE id = ?"
+                         (compilation-history--state-condition "running"))
+                 (vector (1+ start) id)))
+      (`(,text ,running) (list text (eql running 1))))))
 
 (defconst compilation-history--fts-column-names
   '("compile_command" "default_directory" "git_branch" "output")
@@ -637,7 +662,10 @@ Avoids marking a record as killed when it already exited successfully."
 
 (defun compilation-history--save-partial-output (buffer)
   "Save current output from BUFFER to the database.
-No-op if BUFFER is dead, has no record, or output hasn't changed."
+No-op if BUFFER is dead, has no record, or output hasn't changed.
+If another Emacs holds the database lock past
+`compilation-history-db-busy-timeout', the output stays unsaved
+and the next save writes it."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when (and (boundp 'compilation-history-record)
@@ -648,12 +676,15 @@ No-op if BUFFER is dead, has no record, or output hasn't changed."
                                   compilation-history--raw-output)
                         (buffer-substring-no-properties (point-min) (point-max))))
               (record-id (compilation-history-record-id compilation-history-record)))
-          (compilation-history--execute-sql
-           "UPDATE compilations SET output = ? WHERE id = ?"
-           (vector output record-id)))
-        (setq-local compilation-history--unsaved-line-count 0)
-        (setq-local compilation-history--output-dirty nil)
-        (compilation-history--restart-save-timer)))))
+          (condition-case nil
+              (progn
+                (compilation-history--execute-sql
+                 "UPDATE compilations SET output = ? WHERE id = ?"
+                 (vector output record-id))
+                (setq-local compilation-history--unsaved-line-count 0)
+                (setq-local compilation-history--output-dirty nil)
+                (compilation-history--restart-save-timer))
+            (sqlite-locked-error nil)))))))
 
 (defun compilation-history--restart-save-timer ()
   "Restart the periodic save timer for the current buffer.
@@ -722,6 +753,14 @@ for line-threshold saves."
       (setq-local compile-command (compilation-history-command compilation-history-record))
       (setq-local compilation-directory default-directory))))
 
+(defun compilation-history--confirm-mirror-recompile (&rest _)
+  "Ask before recompiling a mirror of a build still running in another Emacs.
+Signal `user-error' if the user declines.  Intended as `:before'
+advice on `recompile'."
+  (when (and (bound-and-true-p compilation-history-view-mirror-mode)
+             (not (y-or-n-p "Still running in another Emacs; start a second run here? ")))
+    (user-error "Not recompiling")))
+
 (defun compilation-history--switch-to-recompile-buffer (orig-fun &rest args)
   "Advice around ORIG-FUN to switch to the new compilation buffer.
 ARGS are passed through.  Only acts when called from a
@@ -777,11 +816,13 @@ ARGS are passed through.  Only acts when called from a
               #'compilation-history--setup-function)
         (advice-add 'compilation-sentinel :before #'compilation-history--add-sentinel-metadata-advice)
         (advice-add 'recompile :around #'compilation-history--switch-to-recompile-buffer)
+        (advice-add 'recompile :before #'compilation-history--confirm-mirror-recompile)
         (add-hook 'kill-emacs-hook #'compilation-history--maybe-save-history))
     (setq compilation-buffer-name-function nil)
     (setq compilation-process-setup-function nil)
     (advice-remove 'compilation-sentinel #'compilation-history--add-sentinel-metadata-advice)
     (advice-remove 'recompile #'compilation-history--switch-to-recompile-buffer)
+    (advice-remove 'recompile #'compilation-history--confirm-mirror-recompile)
     (remove-hook 'kill-emacs-hook #'compilation-history--maybe-save-history)
     ;; Cancel save timers in all active compilation-history buffers
     (dolist (buf (buffer-list))
