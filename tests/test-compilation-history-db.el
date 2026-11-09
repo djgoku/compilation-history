@@ -417,5 +417,30 @@ Returns an alist of (STATE . RECORD-ID)."
                        (mapcar #'car (compilation-history--query-page-fts 10 0 term "running"))))
         (should (= (compilation-history--count-records-fts term) 4))))))
 
+(ert-deftest test-compilation-history--write-waits-for-other-emacs-lock ()
+  "A write waits for another Emacs's write lock instead of failing."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record :record-id "20260321T120000000001"))
+    (let* ((holder
+            (start-process
+             "lock-holder" nil (expand-file-name invocation-name invocation-directory)
+             "--batch" "--eval"
+             (format "%S" `(let ((db (sqlite-open ,temp-db)))
+                             (sqlite-execute db "BEGIN IMMEDIATE")
+                             (princ "locked\n")
+                             (sleep-for 0.5)
+                             (sqlite-execute db "COMMIT")))))
+           (locked nil))
+      (set-process-filter holder (lambda (_proc _out) (setq locked t)))
+      (with-timeout (10 (error "Lock holder never took the lock"))
+        (while (not locked) (accept-process-output holder 0.1)))
+      (compilation-history--execute-sql
+       "UPDATE compilations SET output = ? WHERE id = ?"
+       ["saved" "20260321T120000000001"])
+      (should (equal (compilation-history--get-output "20260321T120000000001")
+                     "saved")))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here

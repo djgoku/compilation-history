@@ -577,6 +577,33 @@ compile-command in the original buffer via setcar on compilation-arguments."
             (should (= 0 compilation-history--unsaved-line-count)))
         (kill-buffer buffer)))))
 
+(ert-deftest test-save-partial-output-retries-after-lock-timeout ()
+  "A partial save that cannot get the lock keeps the output for a later save."
+  (compilation-history-test-with-db
+    (compilation-history-init)
+    (let ((buffer (generate-new-buffer "*test-partial-save*"))
+          (holder (sqlite-open temp-db))
+          (compilation-history-db-busy-timeout 50)
+          (compilation-history-save-interval nil))
+      (unwind-protect
+          (with-current-buffer buffer
+            (setq-local compilation-history-record
+                        (compilation-history-test--make-record))
+            (compilation-history--insert-compilation-record compilation-history-record)
+            (insert "partial output\n")
+            (setq-local compilation-history--output-dirty t)
+            (sqlite-execute holder "BEGIN IMMEDIATE")
+            (compilation-history--save-partial-output buffer)
+            (sqlite-execute holder "COMMIT")
+            (should (null (compilation-history--get-output
+                           (compilation-history-record-id compilation-history-record))))
+            (compilation-history--save-partial-output buffer)
+            (should (equal "partial output\n"
+                           (compilation-history--get-output
+                            (compilation-history-record-id compilation-history-record)))))
+        (sqlite-close holder)
+        (kill-buffer buffer)))))
+
 (ert-deftest test-save-partial-output-skips-dead-buffer ()
   "Test that save-partial-output is a no-op for a dead buffer."
   (let ((buffer (generate-new-buffer "*test-dead-buffer*")))
