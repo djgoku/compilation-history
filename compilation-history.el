@@ -63,6 +63,14 @@
   :type 'file
   :group 'compilation-history)
 
+(defcustom compilation-history-db-busy-timeout 2000
+  "Milliseconds to wait for another Emacs to release the database lock.
+Emacs is blocked while it waits.  When the wait runs out, a write
+signals `sqlite-locked-error'."
+  :type 'natnum
+  :group 'compilation-history
+  :package-version '(compilation-history . "0.2.12"))
+
 (defcustom compilation-history-command-truncate-length 25
   "The length to truncate the compile command to in the buffer name."
   :type 'integer
@@ -307,6 +315,8 @@ without referencing the handle directly."
          (let ((,db-sym compilation-history--db))
            ,@body)
        (let ((,db-sym (sqlite-open compilation-history-db-file)))
+         (sqlite-pragma ,db-sym (format "busy_timeout = %d"
+                                        compilation-history-db-busy-timeout))
          (let ((compilation-history--db ,db-sym))
            (unwind-protect
                (progn ,@body)
@@ -637,7 +647,10 @@ Avoids marking a record as killed when it already exited successfully."
 
 (defun compilation-history--save-partial-output (buffer)
   "Save current output from BUFFER to the database.
-No-op if BUFFER is dead, has no record, or output hasn't changed."
+No-op if BUFFER is dead, has no record, or output hasn't changed.
+If another Emacs holds the database lock past
+`compilation-history-db-busy-timeout', the output stays unsaved
+and the next save writes it."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when (and (boundp 'compilation-history-record)
@@ -648,12 +661,15 @@ No-op if BUFFER is dead, has no record, or output hasn't changed."
                                   compilation-history--raw-output)
                         (buffer-substring-no-properties (point-min) (point-max))))
               (record-id (compilation-history-record-id compilation-history-record)))
-          (compilation-history--execute-sql
-           "UPDATE compilations SET output = ? WHERE id = ?"
-           (vector output record-id)))
-        (setq-local compilation-history--unsaved-line-count 0)
-        (setq-local compilation-history--output-dirty nil)
-        (compilation-history--restart-save-timer)))))
+          (condition-case nil
+              (progn
+                (compilation-history--execute-sql
+                 "UPDATE compilations SET output = ? WHERE id = ?"
+                 (vector output record-id))
+                (setq-local compilation-history--unsaved-line-count 0)
+                (setq-local compilation-history--output-dirty nil)
+                (compilation-history--restart-save-timer))
+            (sqlite-locked-error nil)))))))
 
 (defun compilation-history--restart-save-timer ()
   "Restart the periodic save timer for the current buffer.
