@@ -278,13 +278,17 @@ INDEX is the 0-based row position within the current page."
   (let* ((inhibit-read-only t)
          (page-size (compilation-history-view-pagination-page-size
                      compilation-history-view--pagination))
-         (search compilation-history-view--search-term)
+         (parsed (and compilation-history-view--search-term
+                      (compilation-history--parse-search
+                       compilation-history-view--search-term)))
+         (search (car parsed))
+         (state (cdr parsed))
          (pagination compilation-history-view--pagination))
     ;; Single DB connection for both count and page query
     (compilation-history--with-db _
       (let ((total (or (if search
-                          (compilation-history--count-records-fts search)
-                        (compilation-history--count-records))
+                          (compilation-history--count-records-fts search state)
+                        (compilation-history--count-records state))
                       0)))
         (setf (compilation-history-view-pagination-total-records pagination) total))
       ;; Clamp current page
@@ -294,8 +298,8 @@ INDEX is the 0-based row position within the current page."
       ;; Fetch data
       (let* ((offset (compilation-history-view--page-offset pagination))
              (rows (if search
-                       (compilation-history--query-page-fts page-size offset search)
-                     (compilation-history--query-page page-size offset)))
+                       (compilation-history--query-page-fts page-size offset search state)
+                     (compilation-history--query-page page-size offset state)))
              (objects (cl-loop for row in rows
                              for i from 0
                              collect (compilation-history-view--row-to-plist row i))))
@@ -569,15 +573,17 @@ When called from a mouse EVENT, move point to the click position first."
         (select-window view-window)))))
 
 (defun compilation-history-view--search-capf ()
-  "Completion-at-point function for FTS column names in search minibuffer."
+  "Completion-at-point function for column names and states in search minibuffer."
   (let* ((line (buffer-substring-no-properties (line-beginning-position) (point)))
          ;; Complete at start of input or after a space
          (start (if (string-match "\\(?:^\\|.* \\)\\([^ ]*\\)\\'" line)
                     (- (point) (length (match-string 1 line)))
                   (point))))
     (list start (point)
-          (mapcar (lambda (col) (concat col ":"))
-                  compilation-history--fts-column-names))))
+          (append (mapcar (lambda (col) (concat col ":"))
+                          compilation-history--fts-column-names)
+                  (mapcar (lambda (state) (concat "state:" (car state)))
+                          compilation-history--state-sql)))))
 
 (defvar-keymap compilation-history-view-search-map
   :doc "Keymap for the history search prompt."
@@ -587,8 +593,9 @@ When called from a mouse EVENT, move point to the click position first."
 (defun compilation-history-view-search ()
   "Search compilation history using FTS.
 Supports substring matching and column-specific searches
-\(e.g., compile_command:make).  TAB completes column names.
-Empty input clears the search."
+\(e.g., compile_command:make).  A state:VALUE word (running,
+success, failure, or killed) filters by state.  TAB completes column
+names and states.  Empty input clears the search."
   (interactive)
   (let ((term (minibuffer-with-setup-hook
                   (lambda ()
@@ -599,6 +606,9 @@ Empty input clears the search."
                      (format "Search (current: %s): " compilation-history-view--search-term)
                    "Search: ")
                  nil compilation-history-view-search-map))))
+    ;; Reject an unknown state before replacing the current search
+    (unless (string-empty-p term)
+      (compilation-history--parse-search term))
     (setq compilation-history-view--search-term
           (if (string-empty-p term) nil term))
     ;; Reset to page 1 on new search

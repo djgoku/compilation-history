@@ -393,10 +393,27 @@ Optional KILLED flag marks the compilation as killed."
      sql
      (vector exit-code output (if killed 1 0) id))))
 
-(defun compilation-history--count-records ()
-  "Return the total number of compilation records."
+(defconst compilation-history--state-sql
+  '(("running" . "end_time IS NULL")
+    ("killed"  . "end_time IS NOT NULL AND COALESCE(killed, 0) != 0")
+    ("success" . "end_time IS NOT NULL AND COALESCE(killed, 0) = 0 AND exit_code = 0")
+    ("failure" . "end_time IS NOT NULL AND COALESCE(killed, 0) = 0 AND (exit_code IS NULL OR exit_code != 0)"))
+  "SQL WHERE conditions for each derived compilation state.
+Must agree with `compilation-history-view--derive-status'.")
+
+(defun compilation-history--state-condition (state)
+  "Return the SQL condition selecting records in STATE.
+STATE is a key of `compilation-history--state-sql', or nil for all records."
+  (if state
+      (format "(%s)" (or (cdr (assoc state compilation-history--state-sql))
+                         (error "Unknown compilation state: %s" state)))
+    "1"))
+
+(defun compilation-history--count-records (&optional state)
+  "Return the number of compilation records, limited to STATE if non-nil."
   (compilation-history--with-db db
-    (caar (sqlite-select db "SELECT COUNT(*) FROM compilations"))))
+    (caar (sqlite-select db (format "SELECT COUNT(*) FROM compilations WHERE %s"
+                                    (compilation-history--state-condition state))))))
 
 (defconst compilation-history--page-columns
   "id, buffer_name, compile_command, default_directory, datetime(start_time, COALESCE(utc_offset, 0) || ' minutes') AS start_time, end_time, exit_code, killed, git_branch, git_commit, comint"
@@ -411,14 +428,16 @@ start_time has one-second resolution; id breaks ties within a second.")
   "CASE WHEN end_time IS NOT NULL AND start_time IS NOT NULL THEN (julianday(end_time) - julianday(start_time)) * 86400.0 ELSE NULL END AS duration_seconds"
   "SQL expression to compute duration in seconds.")
 
-(defun compilation-history--query-page (limit offset)
+(defun compilation-history--query-page (limit offset &optional state)
   "Return LIMIT compilation records starting at OFFSET, newest first.
+When STATE is non-nil, only return records in that state.
 Each row includes a computed duration_seconds column appended at the end."
   (compilation-history--with-db db
     (sqlite-select db
-                   (format "SELECT %s, %s FROM compilations ORDER BY %s LIMIT ? OFFSET ?"
+                   (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY %s LIMIT ? OFFSET ?"
                            compilation-history--page-columns
                            compilation-history--duration-expr
+                           (compilation-history--state-condition state)
                            compilation-history--newest-first)
                    (vector limit offset))))
 
@@ -460,51 +479,75 @@ Only recognizes column:value when the column is a valid FTS column name."
       (cons (format "(%s)" (mapconcat #'identity clauses " OR "))
             (apply #'vector (make-list (length compilation-history--fts-column-names) pattern))))))
 
-(defun compilation-history--count-records-fts (search-term)
+(defun compilation-history--parse-search (search-term)
+  "Split SEARCH-TERM into (TEXT . STATE).
+A state:VALUE word selects records in that state, VALUE being a key of
+`compilation-history--state-sql'.  TEXT is the rest of SEARCH-TERM, or
+nil when nothing else remains.  Signal a `user-error' for an unknown state."
+  (if (string-match "\\(?:\\`\\| \\)state:\\(\\S-*\\)" search-term)
+      (let ((state (match-string 1 search-term))
+            (text (string-trim (replace-match "" t t search-term))))
+        (unless (assoc state compilation-history--state-sql)
+          (user-error "Unknown state \"%s\"; expected one of: %s" state
+                      (mapconcat #'car compilation-history--state-sql ", ")))
+        (cons (unless (string-empty-p text) text) state))
+    (cons search-term nil)))
+
+(defun compilation-history--count-records-fts (search-term &optional state)
   "Return the number of compilation records matching SEARCH-TERM.
+When STATE is non-nil, only count records in that state.
 Uses LIKE for short terms (< 3 chars), FTS otherwise.
 Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
   (compilation-history--with-db db
-    (let ((parts (compilation-history--like-sql-parts search-term)))
+    (let ((parts (compilation-history--like-sql-parts search-term))
+          (state-condition (compilation-history--state-condition state)))
       (or (if (compilation-history--search-needs-like-p search-term)
               (caar (sqlite-select db
-                                   (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
+                                   (format "SELECT COUNT(*) FROM compilations WHERE %s AND %s"
+                                           (car parts) state-condition)
                                    (cdr parts)))
             (or (caar (sqlite-select db
-                                     "SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?)"
+                                     (format "SELECT COUNT(*) FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) AND %s"
+                                             state-condition)
                                      (vector search-term)))
                 ;; FTS returned nil — fall back to LIKE
                 (caar (sqlite-select db
-                                     (format "SELECT COUNT(*) FROM compilations WHERE %s" (car parts))
+                                     (format "SELECT COUNT(*) FROM compilations WHERE %s AND %s"
+                                             (car parts) state-condition)
                                      (cdr parts)))))
           0))))
 
-(defun compilation-history--query-page-fts (limit offset search-term)
+(defun compilation-history--query-page-fts (limit offset search-term &optional state)
   "Return LIMIT matching records starting at OFFSET for SEARCH-TERM.
+When STATE is non-nil, only return records in that state.
 Uses LIKE for short terms (< 3 chars), FTS otherwise.
 Falls back to LIKE if FTS MATCH returns nil (e.g. special characters in query)."
   (compilation-history--with-db db
-    (let ((parts (compilation-history--like-sql-parts search-term)))
+    (let ((parts (compilation-history--like-sql-parts search-term))
+          (state-condition (compilation-history--state-condition state)))
       (if (compilation-history--search-needs-like-p search-term)
           (sqlite-select db
-                         (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY %s LIMIT ? OFFSET ?"
+                         (format "SELECT %s, %s FROM compilations WHERE %s AND %s ORDER BY %s LIMIT ? OFFSET ?"
                                  compilation-history--page-columns
                                  compilation-history--duration-expr
                                  (car parts)
+                                 state-condition
                                  compilation-history--newest-first)
                          (vconcat (cdr parts) (vector limit offset)))
         (or (sqlite-select db
-                           (format "SELECT %s, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) ORDER BY %s LIMIT ? OFFSET ?"
+                           (format "SELECT %s, %s FROM compilations WHERE rowid IN (SELECT rowid FROM compilations_fts WHERE compilations_fts MATCH ?) AND %s ORDER BY %s LIMIT ? OFFSET ?"
                                    compilation-history--page-columns
                                    compilation-history--duration-expr
+                                   state-condition
                                    compilation-history--newest-first)
                            (vector search-term limit offset))
             ;; FTS returned nil — fall back to LIKE
             (sqlite-select db
-                           (format "SELECT %s, %s FROM compilations WHERE %s ORDER BY %s LIMIT ? OFFSET ?"
+                           (format "SELECT %s, %s FROM compilations WHERE %s AND %s ORDER BY %s LIMIT ? OFFSET ?"
                                    compilation-history--page-columns
                                    compilation-history--duration-expr
                                    (car parts)
+                                   state-condition
                                    compilation-history--newest-first)
                            (vconcat (cdr parts) (vector limit offset))))))))
 

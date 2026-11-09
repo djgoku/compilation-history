@@ -800,5 +800,75 @@
                         compilation-history-view--pagination) 1)))
         (kill-buffer buf)))))
 
+;;; State search
+
+(defun compilation-history-view-test--insert-running-and-finished ()
+  "Insert a running \"make test\", a finished \"make clean\", and a running npm build."
+  (compilation-history--insert-compilation-record
+   (compilation-history-test--make-record
+    :record-id "20261109T120000000001"
+    :command "make test"))
+  (compilation-history--insert-compilation-record
+   (compilation-history-test--make-record
+    :record-id "20261109T120000000002"
+    :command "make clean"))
+  (compilation-history--update-compilation-record "20261109T120000000002" 0 "output")
+  (compilation-history--insert-compilation-record
+   (compilation-history-test--make-record
+    :record-id "20261109T120000000003"
+    :command "npm run build")))
+
+(ert-deftest test-compilation-history-view-search-by-state ()
+  "A state:VALUE token in the search filters by state, alone or with search text."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history-view-test--insert-running-and-finished)
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (pcase-dolist (`(,term ,count) '(("state:running" 2)
+                                             ("state:success" 1)
+                                             ("state:running make" 1)
+                                             ("make state:running" 1)))
+              (setq compilation-history-view--search-term term)
+              (compilation-history-view--render)
+              (should (= (compilation-history-view-pagination-total-records
+                          compilation-history-view--pagination)
+                         count)))
+            (should (string-match-p "make test" (buffer-string)))
+            (should-not (string-match-p "make clean" (buffer-string))))
+        (kill-buffer buf)))))
+
+(ert-deftest test-compilation-history-view-search-unknown-state ()
+  "An unknown state:VALUE signals a user error and keeps the current search."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history-view-test--insert-running-and-finished)
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (ert-simulate-keys (kbd "make RET")
+              (compilation-history-view-search))
+            (should-error (ert-simulate-keys (kbd "state:bogus RET")
+                            (compilation-history-view-search))
+                          :type 'user-error)
+            (should (equal compilation-history-view--search-term "make")))
+        (kill-buffer buf)))))
+
+(ert-deftest test-compilation-history-view-search-tab-completes-state ()
+  "TAB at the search prompt completes state: and then a state name."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history-view-test--insert-running-and-finished)
+    (let ((buf (compilation-history-view)))
+      (unwind-protect
+          (with-current-buffer buf
+            (ert-simulate-keys (kbd "sta TAB ru TAB RET")
+              (compilation-history-view-search))
+            (should (equal compilation-history-view--search-term "state:running"))
+            (should (= (compilation-history-view-pagination-total-records
+                        compilation-history-view--pagination) 2)))
+        (kill-buffer buf)))))
+
 (provide 'test-compilation-history-view)
 ;;; test-compilation-history-view.el ends here

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Run ERT test suite in batch mode"
+#MISE depends=["clean"]
 set -euo pipefail
 
 PROJECT="${MISE_PROJECT_DIR:-.}"
