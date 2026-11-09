@@ -286,10 +286,14 @@ ERROR is the failure from the final save, or nil when it succeeded."
       (remhash id compilation-history-agent--jobs))))
 
 (defun compilation-history-agent--validate-directory (directory)
-  "Return DIRECTORY as an existing local directory name."
+  "Return DIRECTORY as an existing local directory name.
+A relative DIRECTORY is rejected: the server would resolve it against
+its own `default-directory', not the caller's."
   (unless (and (stringp directory) (not (string-empty-p directory))
                (not (string-search "\0" directory)) (not (file-remote-p directory)))
     (compilation-history-agent--invalid "Directory must be local text without NUL"))
+  (unless (file-name-absolute-p directory)
+    (compilation-history-agent--invalid "Directory must be an absolute path"))
   (let ((directory (file-name-as-directory (expand-file-name directory))))
     (unless (file-directory-p directory)
       (compilation-history-agent--invalid "Directory does not exist"))

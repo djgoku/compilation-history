@@ -124,7 +124,7 @@ ID is the compilation whose `get' recovers from a failure."
              (pcase arg
                ("--server" (setq ch-agent-cli-selector value))
                ("--command" (setq command value))
-               ("--directory" (setq directory value))
+               ("--directory" (setq directory (expand-file-name value)))
                ("--search" (setq search value))
                ((or "--limit" "--offset")
                 (unless (string-match-p "\\`[0-9]+\\'" value)

@@ -164,6 +164,8 @@
                        (:op start :command "true")
                        (:op start :command "true" :directory 4)
                        (:op start :command "true" :directory "/ssh:host:/tmp/")
+                       (:op start :command "true" :directory ".")
+                       (:op start :command "true" :directory "tests")
                        (:op start :command "true" :directory "/does-not-exist-agent/")))
       (should (equal "invalid_request"
                      (alist-get 'error (compilation-history-agent-test-request request)))))

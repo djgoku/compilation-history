@@ -90,6 +90,11 @@ jq -e --arg id "$vertical_id" '.total == 1 and .records[0].id == $id and .record
 check ".records[0].id == \"$vertical_id\" and (.records | length) == 1" "$test_root/list-newest"
 printf 'PASS real CLI list and search\n'
 
+mkdir "$test_root/relative-cwd"
+(cd "$test_root/relative-cwd" && "${cli[@]}" run --directory . --command pwd) > "$test_root/relative"
+check ".state == \"succeeded\" and .directory == \"$test_root/relative-cwd/\" and (.tail | contains(\"\n$test_root/relative-cwd\n\"))" "$test_root/relative"
+printf 'PASS relative --directory resolves against the shell directory\n'
+
 command_value=$'printf \'$HOME "λ" 🚀 \\\\ \'\n# $(touch SHOULD_NOT_EXIST)'
 "${cli[@]}" start --directory "$test_root" --command "$command_value" > "$test_root/hostile"
 jq -e --arg command "$command_value" '.command == $command' "$test_root/hostile" >/dev/null
