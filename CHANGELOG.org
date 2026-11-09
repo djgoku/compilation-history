@@ -1,5 +1,14 @@
 #+TITLE: Changelog
 
+* [0.2.11] - 2026-11-09
+** Added
+- filter history search by state:VALUE
+- filter compilation queries by state
+** Other
+- pin GITHUB_REF_NAME in the remote release tests
+- create release commits through GitHub's API so they are signed
+- remove stale .elc before tests and checks
+
 * [0.2.10] - 2026-11-02
 ** Fixed
 - list records that start in the same second newest first
