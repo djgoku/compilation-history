@@ -442,5 +442,25 @@ Returns an alist of (STATE . RECORD-ID)."
       (should (equal (compilation-history--get-output "20260321T120000000001")
                      "saved")))))
 
+(ert-deftest test-compilation-history--read-does-not-wait-for-a-writer ()
+  "Reading history returns the last saved output while another Emacs writes."
+  (compilation-history-test-with-db
+    (compilation-history--ensure-db)
+    (compilation-history--insert-compilation-record
+     (compilation-history-test--make-record :record-id "20260321T120000000001"))
+    (compilation-history--execute-sql
+     "UPDATE compilations SET output = ? WHERE id = ?"
+     ["saved" "20260321T120000000001"])
+    (let ((writer (sqlite-open temp-db))
+          (compilation-history-db-busy-timeout 50))
+      (unwind-protect
+          (progn
+            (sqlite-execute writer "BEGIN EXCLUSIVE")
+            (sqlite-execute writer "UPDATE compilations SET output = 'unsaved'")
+            (should (equal (compilation-history--get-output "20260321T120000000001")
+                           "saved")))
+        (sqlite-execute writer "ROLLBACK")
+        (sqlite-close writer)))))
+
 (provide 'test-compilation-history-db)
 ;;; test-compilation-history-db.el ends here
