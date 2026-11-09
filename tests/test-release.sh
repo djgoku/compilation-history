@@ -18,6 +18,9 @@ run_test() {
   git init -q
   git config user.email "test@test.com"
   git config user.name "Test"
+  # Keep fixtures independent of the caller's signing configuration.
+  git config commit.gpgsign false
+  git config tag.gpgsign false
 
   # Create the two .el files
   for f in compilation-history.el compilation-history-view.el; do
@@ -316,6 +319,90 @@ test_multi_release() {
   done
 }
 
+# Stand-in for gh: `api graphql` builds the commit createCommitOnBranch would
+# make in the bare repo $FAKE_ORIGIN, and `release create` tags it there.
+# FAKE_GH_TAMPER=1 changes a file so the published tree differs.
+make_fake_gh() {
+  local bin=$1
+  cat > "$bin/gh" <<'GHEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1 $2" in
+  "auth status") exit 0 ;;
+  "api graphql")
+    payload=$(cat); printf '%s\n' "$payload" > "$FAKE_GH_LOG.payload"
+    input=$(printf '%s' "$payload" | jq -c '.variables.input')
+    branch=$(jq -r '.branch.branchName' <<< "$input")
+    [ "$(git -C "$FAKE_ORIGIN" rev-parse "$branch")" = "$(jq -r '.expectedHeadOid' <<< "$input")" ]
+    work=$(mktemp -d)
+    git clone -q --branch "$branch" "$FAKE_ORIGIN" "$work"
+    while IFS=$'\t' read -r path contents; do
+      printf '%s' "$contents" | base64 --decode > "$work/$path"
+    done < <(jq -r '.fileChanges.additions[] | [.path, .contents] | @tsv' <<< "$input")
+    [ -z "${FAKE_GH_TAMPER:-}" ] || echo tampered >> "$work/CHANGELOG.org"
+    git -C "$work" add -A
+    git -C "$work" -c user.name=web-flow -c user.email=noreply@github.com -c commit.gpgsign=false \
+      commit -q -m "$(jq -r '.message.headline' <<< "$input")"
+    git -C "$work" push -q origin "$branch"
+    git -C "$work" rev-parse HEAD
+    rm -rf "$work" ;;
+  "release create")
+    printf '%s\n' "$*" > "$FAKE_GH_LOG.release"
+    shift 2; tag=$1; target=
+    while [ "$#" -gt 0 ]; do [ "$1" = --target ] && target=$2; shift; done
+    git -C "$FAKE_ORIGIN" -c tag.gpgsign=false tag "$tag" "$target" ;;
+  *) echo "fake gh: unexpected $*" >&2; exit 1 ;;
+esac
+GHEOF
+  chmod +x "$bin/gh"
+}
+
+setup_fake_remote() {
+  local tmpdir=$1
+  FAKE_ORIGIN=$(mktemp -d); FAKE_GH_BIN=$(mktemp -d); FAKE_GH_LOG=$FAKE_GH_BIN/log
+  git init -q --bare "$FAKE_ORIGIN"
+  git -C "$tmpdir" remote add origin "$FAKE_ORIGIN"
+  git -C "$tmpdir" commit -q --allow-empty -m "feat: something"
+  git -C "$tmpdir" push -q origin HEAD
+  make_fake_gh "$FAKE_GH_BIN"
+  export FAKE_ORIGIN FAKE_GH_LOG
+}
+
+test_remote_release_publishes_api_commit() {
+  local tmpdir="$1" branch head status=0
+  cd "$tmpdir"
+  setup_fake_remote "$tmpdir"
+  branch=$(git branch --show-current)
+  # Set GITHUB_REF_NAME as a push to the branch would; a pull request's CI
+  # job exports its own (e.g. 22/merge), which the fake origin lacks.
+  PATH="$FAKE_GH_BIN:$PATH" GITHUB_REPOSITORY=owner/repo GITHUB_REF_NAME="$branch" \
+    MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check > "$FAKE_GH_LOG.out" 2>&1 || status=$?
+  head=$(git -C "$FAKE_ORIGIN" rev-parse "$branch")
+  [ "$status" -eq 0 ] || { cat "$FAKE_GH_LOG.out"; return 1; }
+  [ "$(git -C "$FAKE_ORIGIN" log -1 --format=%s "$branch")" = "chore: release v0.1.1 [skip ci]" ] || return 1
+  [ "$(git -C "$FAKE_ORIGIN" log -1 --format=%ce "$branch")" = noreply@github.com ] || return 1
+  [ "$(git rev-parse HEAD)" = "$head" ] || { echo "local HEAD not reset to the API commit"; return 1; }
+  [ "$(git -C "$FAKE_ORIGIN" rev-parse v0.1.1^{commit})" = "$head" ] || return 1
+  grep -q -- "--target $head" "$FAKE_GH_LOG.release" || return 1
+  for f in compilation-history.el compilation-history-view.el; do
+    git -C "$FAKE_ORIGIN" show "$branch:$f" | grep -q '^;; Version: 0.1.1' || { echo "$f not published at 0.1.1"; return 1; }
+  done
+  jq -e '.variables.input.fileChanges.additions | map(.path) | sort ==
+    ["CHANGELOG.org","compilation-history-view.el","compilation-history.el"]' \
+    "$FAKE_GH_LOG.payload" > /dev/null
+}
+
+test_remote_release_rejects_mismatched_api_commit() {
+  local tmpdir="$1" output status=0
+  cd "$tmpdir"
+  setup_fake_remote "$tmpdir"
+  output=$(PATH="$FAKE_GH_BIN:$PATH" GITHUB_REPOSITORY=owner/repo FAKE_GH_TAMPER=1 \
+    GITHUB_REF_NAME="$(git branch --show-current)" MISE_PROJECT_DIR="$tmpdir" \
+    "$RELEASE_SCRIPT" --no-branch-check 2>&1) || status=$?
+  [ "$status" -ne 0 ] && echo "$output" | grep -q "does not match the local release commit" &&
+    [ ! -e "$FAKE_GH_LOG.release" ]
+}
+
 run_test "dirty working tree aborts" test_dirty_tree_aborts
 run_test "wrong branch aborts" test_wrong_branch_aborts
 run_test "wrong branch with --no-branch-check proceeds" test_wrong_branch_with_flag_proceeds
@@ -325,5 +412,7 @@ run_test "dry-run has no side effects" test_dry_run_no_side_effects
 run_test "dry-run shows markdown preview" test_dry_run_shows_markdown_preview
 run_test "end-to-end local release" test_end_to_end_local
 run_test "multi-release prepends correctly" test_multi_release
+run_test "remote release publishes a GitHub-made commit and tags it" test_remote_release_publishes_api_commit
+run_test "remote release rejects an API commit that differs locally" test_remote_release_rejects_mismatched_api_commit
 
 summary

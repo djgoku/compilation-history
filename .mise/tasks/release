@@ -272,25 +272,54 @@ update_changelog "$changelog_section"
 
 # --- Git operations ---
 
+release_message="chore: release v${new_version} [skip ci]"
 git add "${EL_FILES[@]}" "$PROJECT/CHANGELOG.org"
-git commit -m "chore: release v${new_version} [skip ci]"
-git tag "v${new_version}"
-
-echo "Created commit and tag v${new_version}"
+git commit -q -m "$release_message"
 
 if "$LOCAL_ONLY"; then
+  git tag "v${new_version}"
+  echo "Created commit and tag v${new_version}"
   echo "Local-only mode: skipping push and GitHub release"
   exit 0
 fi
 
 # --- Remote operations ---
 
-git push
-git push --tags
-echo "Pushed to remote"
+# A pushed local commit is unsigned. GitHub signs commits created through the
+# createCommitOnBranch mutation, so the release commit is recreated there from
+# the files the local commit changed, then checked against the local tree.
+publish_signed_commit() {
+  local repo branch parent additions="" path oid
+  repo=${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
+  branch=${GITHUB_REF_NAME:-$(git branch --show-current)}
+  parent=$(git rev-parse HEAD~1)
+  while IFS= read -r path; do
+    additions+="${additions:+,}{\"path\":\"$path\",\"contents\":\"$(base64 < "$(git rev-parse --show-toplevel)/$path" | tr -d '\n')\"}"
+  done < <(git diff --name-only HEAD~1 HEAD)
+  oid=$(printf '%s' "{\"query\":\"mutation(\$input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: \$input) { commit { oid } } }\",
+    \"variables\":{\"input\":{
+      \"branch\":{\"repositoryNameWithOwner\":\"$repo\",\"branchName\":\"$branch\"},
+      \"message\":{\"headline\":\"$release_message\"},
+      \"expectedHeadOid\":\"$parent\",
+      \"fileChanges\":{\"additions\":[$additions]}}}}" \
+    | gh api graphql --input - --jq .data.createCommitOnBranch.commit.oid)
+  git fetch -q origin "$branch"
+  if [ "$(git rev-parse "$oid^{tree}")" != "$(git rev-parse HEAD^{tree})" ] ||
+     [ "$(git rev-parse "$oid^")" != "$parent" ]; then
+    echo "Error: GitHub commit $oid does not match the local release commit" >&2
+    exit 1
+  fi
+  git reset -q --hard "$oid"
+  printf '%s\n' "$oid"
+}
+
+oid=$(publish_signed_commit)
+echo "Created signed commit $oid on GitHub"
 
 org_to_markdown "$changelog_section" | gh release create "v${new_version}" \
+  --target "$oid" \
   --title "v${new_version}" \
   --notes-file -
+git fetch -q --tags origin
 
-echo "Created GitHub release v${new_version}"
+echo "Created GitHub release and tag v${new_version}"
