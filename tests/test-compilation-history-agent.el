@@ -523,16 +523,27 @@
 (ert-deftest agent-show-reports-reopened-history-buffers-with-their-terminal-state ()
   (compilation-history-agent-test-with-session
     (compilation-history--ensure-db)
-    (dolist (case '((0 "success" "succeeded") (7 "failed" "failed") (-1 "killed" "killed")))
-      (let* ((id "20260903T120000000080")
-             (buffer (compilation-history-view--get-or-create-compilation-buffer
-                      (list :id id :buffer-name "*agent-reopened*" :directory default-directory
-                            :command "true" :exit-code (car case) :status (nth 1 case)))))
+    (pcase-dolist (`(,id ,exit ,killed ,state) '(("20260903T120000000080" 0 nil "succeeded")
+                                                 ("20260903T120000000081" 7 nil "failed")
+                                                 ("20260903T120000000082" -1 t "killed")))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record :record-id id :buffer-name (format "*agent-reopened-%s*" id)
+                                              :compile-directory default-directory))
+      (compilation-history--update-compilation-record id exit "output" killed)
+      (let ((reply (compilation-history-agent-test-request `(:op show :id ,id))))
         (unwind-protect
-            (should (equal (nth 2 case)
-                           (alist-get 'state (compilation-history-agent-test-request
-                                              `(:op show :id ,id)))))
-          (kill-buffer buffer))))))
+            (should (equal state (alist-get 'state reply)))
+          (kill-buffer (alist-get 'buffer reply)))))))
+
+(ert-deftest agent-show-and-get-agree-when-history-mode-stops-mid-run ()
+  (compilation-history-agent-test-with-session
+    (let ((id (alist-get 'id (compilation-history-agent-test-start "sleep 0.3; exit 4"))))
+      (compilation-history-mode -1)
+      (let ((state (alist-get 'state (compilation-history-agent-test-finished id))))
+        (compilation-history-agent-test-await
+         (lambda () (not (get-buffer-process (compilation-history-agent--find-buffer id)))))
+        (should (equal state (alist-get 'state (compilation-history-agent-test-request
+                                                `(:op show :id ,id)))))))))
 
 (provide 'test-compilation-history-agent)
 ;;; test-compilation-history-agent.el ends here

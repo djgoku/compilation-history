@@ -436,27 +436,24 @@ raise a frame or request operating-system focus."
            "unknown_id" "No compilation buffer or history record" id))
     ((and (pred consp) reply) reply)
     (buffer
-     (condition-case err
-         (let* ((frame (selected-frame))
-                (display-buffer-overriding-action
-                 `(compilation-history-agent--display-on-frame
-                   (reusable-frames . ,frame) (inhibit-switch-frame . t) (allow-no-window . t)))
-                (window (save-selected-window (display-buffer buffer)))
-                (record (buffer-local-value 'compilation-history-record buffer))
-                (exit (compilation-history-exit-code record)))
-           (unless (and (window-live-p window) (eq frame (window-frame window)))
-             (error "No compilation window is available on the selected frame"))
-           (when select (select-window window))
-           `((protocol_version . 1) (id . ,id)
-             (state . ,(compilation-history-agent--state
-                        exit
-                        (string-match-p (rx (or "killed" "interrupt"))
-                                        (or (compilation-history-message record) ""))
-                        (and exit (not (process-live-p (get-buffer-process buffer))))))
-             (buffer . ,(buffer-name buffer))
-             (display . ,(compilation-history-agent--display-state buffer))))
-       (error (compilation-history-agent--error-reply
-               "display_unavailable" (error-message-string err) id))))))
+     (let ((persisted (compilation-history-agent-get id)))
+       (if (alist-get 'error persisted)
+           persisted
+         (condition-case err
+             (let* ((frame (selected-frame))
+                    (display-buffer-overriding-action
+                     `(compilation-history-agent--display-on-frame
+                       (reusable-frames . ,frame) (inhibit-switch-frame . t) (allow-no-window . t)))
+                    (window (save-selected-window (display-buffer buffer))))
+               (unless (and (window-live-p window) (eq frame (window-frame window)))
+                 (error "No compilation window is available on the selected frame"))
+               (when select (select-window window))
+               `((protocol_version . 1) (id . ,id)
+                 (state . ,(alist-get 'state persisted))
+                 (buffer . ,(buffer-name buffer))
+                 (display . ,(compilation-history-agent--display-state buffer))))
+           (error (compilation-history-agent--error-reply
+                   "display_unavailable" (error-message-string err) id))))))))
 
 ;;; Runtime
 
