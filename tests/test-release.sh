@@ -373,8 +373,10 @@ test_remote_release_publishes_api_commit() {
   cd "$tmpdir"
   setup_fake_remote "$tmpdir"
   branch=$(git branch --show-current)
-  PATH="$FAKE_GH_BIN:$PATH" GITHUB_REPOSITORY=owner/repo MISE_PROJECT_DIR="$tmpdir" \
-    "$RELEASE_SCRIPT" --no-branch-check > "$FAKE_GH_LOG.out" 2>&1 || status=$?
+  # Set GITHUB_REF_NAME as a push to the branch would; a pull request's CI
+  # job exports its own (e.g. 22/merge), which the fake origin lacks.
+  PATH="$FAKE_GH_BIN:$PATH" GITHUB_REPOSITORY=owner/repo GITHUB_REF_NAME="$branch" \
+    MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check > "$FAKE_GH_LOG.out" 2>&1 || status=$?
   head=$(git -C "$FAKE_ORIGIN" rev-parse "$branch")
   [ "$status" -eq 0 ] || { cat "$FAKE_GH_LOG.out"; return 1; }
   [ "$(git -C "$FAKE_ORIGIN" log -1 --format=%s "$branch")" = "chore: release v0.1.1 [skip ci]" ] || return 1
@@ -395,7 +397,8 @@ test_remote_release_rejects_mismatched_api_commit() {
   cd "$tmpdir"
   setup_fake_remote "$tmpdir"
   output=$(PATH="$FAKE_GH_BIN:$PATH" GITHUB_REPOSITORY=owner/repo FAKE_GH_TAMPER=1 \
-    MISE_PROJECT_DIR="$tmpdir" "$RELEASE_SCRIPT" --no-branch-check 2>&1) || status=$?
+    GITHUB_REF_NAME="$(git branch --show-current)" MISE_PROJECT_DIR="$tmpdir" \
+    "$RELEASE_SCRIPT" --no-branch-check 2>&1) || status=$?
   [ "$status" -ne 0 ] && echo "$output" | grep -q "does not match the local release commit" &&
     [ ! -e "$FAKE_GH_LOG.release" ]
 }
