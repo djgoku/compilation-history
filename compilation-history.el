@@ -458,6 +458,19 @@ Each row includes a computed duration_seconds column appended at the end."
                          "SELECT output FROM compilations WHERE id = ?"
                          (vector id)))))
 
+(defun compilation-history--output-since (id start)
+  "Return (TEXT RUNNING) for compilation record ID.
+TEXT is the saved output after its first START characters, or nil
+when there is none.  RUNNING is non-nil while the record has not
+finished."
+  (compilation-history--with-db db
+    (pcase (car (sqlite-select
+                 db
+                 (format "SELECT substr(output, ?), %s FROM compilations WHERE id = ?"
+                         (compilation-history--state-condition "running"))
+                 (vector (1+ start) id)))
+      (`(,text ,running) (list text (eql running 1))))))
+
 (defconst compilation-history--fts-column-names
   '("compile_command" "default_directory" "git_branch" "output")
   "FTS-indexed column names for LIKE fallback.")
@@ -738,6 +751,14 @@ for line-threshold saves."
       (setq-local compile-command (compilation-history-command compilation-history-record))
       (setq-local compilation-directory default-directory))))
 
+(defun compilation-history--confirm-mirror-recompile (&rest _)
+  "Ask before recompiling a mirror of a build still running in another Emacs.
+Signal `user-error' if the user declines.  Intended as `:before'
+advice on `recompile'."
+  (when (and (bound-and-true-p compilation-history-view-mirror-mode)
+             (not (y-or-n-p "Still running in another Emacs; start a second run here? ")))
+    (user-error "Not recompiling")))
+
 (defun compilation-history--switch-to-recompile-buffer (orig-fun &rest args)
   "Advice around ORIG-FUN to switch to the new compilation buffer.
 ARGS are passed through.  Only acts when called from a
@@ -793,11 +814,13 @@ ARGS are passed through.  Only acts when called from a
               #'compilation-history--setup-function)
         (advice-add 'compilation-sentinel :before #'compilation-history--add-sentinel-metadata-advice)
         (advice-add 'recompile :around #'compilation-history--switch-to-recompile-buffer)
+        (advice-add 'recompile :before #'compilation-history--confirm-mirror-recompile)
         (add-hook 'kill-emacs-hook #'compilation-history--maybe-save-history))
     (setq compilation-buffer-name-function nil)
     (setq compilation-process-setup-function nil)
     (advice-remove 'compilation-sentinel #'compilation-history--add-sentinel-metadata-advice)
     (advice-remove 'recompile #'compilation-history--switch-to-recompile-buffer)
+    (advice-remove 'recompile #'compilation-history--confirm-mirror-recompile)
     (remove-hook 'kill-emacs-hook #'compilation-history--maybe-save-history)
     ;; Cancel save timers in all active compilation-history buffers
     (dolist (buf (buffer-list))
