@@ -352,6 +352,26 @@
     (should (equal "unknown_id"
                    (alist-get 'error (compilation-history-agent-test-get "20260903T120000000082"))))))
 
+(ert-deftest agent-get-replaces-invalid-bytes-in-the-tail-and-full-output ()
+  (compilation-history-agent-test-with-session
+    (compilation-history--ensure-db)
+    (let ((id "20260903T120000000081")
+          (raw (string (unibyte-char-to-multibyte #xff))))
+      (compilation-history--insert-compilation-record
+       (compilation-history-test--make-record :record-id id))
+      (compilation-history--update-compilation-record
+       id 0 (concat "a" raw (make-string 5000 ?x) "b" raw "c") nil)
+      (should (equal (concat (make-string 4093 ?x) "b�c")
+                     (alist-get 'tail (compilation-history-agent-test-get id))))
+      (let ((file (alist-get 'output_file (compilation-history-agent-test-get id t))))
+        (unwind-protect
+            (should (equal (concat "a�" (make-string 5000 ?x) "b�c")
+                           (with-temp-buffer
+                             (let ((coding-system-for-read 'utf-8-unix))
+                               (insert-file-contents file))
+                             (buffer-string))))
+          (delete-file file))))))
+
 (ert-deftest agent-get-full-writes-exact-output-to-a-private-file ()
   (compilation-history-agent-test-with-session
     (let ((id "20260903T120000000081")

@@ -86,10 +86,14 @@ With ID, include it and the `get' command that recovers its history."
   "Signal an invalid request with MESSAGE."
   (signal 'compilation-history-agent-invalid-request (list message)))
 
+(defun compilation-history-agent--sanitize (text)
+  "Replace raw non-UTF-8 bytes in TEXT, which the CLI's JSON cannot carry."
+  (replace-regexp-in-string (rx (any (#x3fff80 . #x3fffff))) "\uFFFD" text t t))
+
 (defun compilation-history-agent--tail (text)
   "Return the final 4096 characters of TEXT and a truncation flag."
   (let ((start (max 0 (- (length text) 4096))))
-    `((tail . ,(substring text start))
+    `((tail . ,(compilation-history-agent--sanitize (substring text start)))
       (tail_truncated . ,(if (> start 0) t :false)))))
 
 (defun compilation-history-agent--display-state (buffer)
@@ -349,10 +353,7 @@ Non-nil DISPLAY shows the buffer on the selected frame."
         (pcase (compilation-history--get-record id)
           ('nil (compilation-history-agent--error-reply "unknown_id" "No persisted record for this ID"))
           (`(,_ ,buffer ,command ,directory ,_start ,end ,exit ,killed ,_ ,_ ,_ ,duration)
-           (let* ((output (replace-regexp-in-string
-                           ;; The CLI prints JSON, which cannot carry raw non-UTF-8 bytes.
-                           (rx (any (#x3fff80 . #x3fffff))) "\uFFFD"
-                           (or (compilation-history--get-output id) "") t t))
+           (let* ((output (or (compilation-history--get-output id) ""))
                   (state (compilation-history-agent--state exit (eql killed 1) end))
                   (running (equal state "running")))
              (append
@@ -361,7 +362,7 @@ Non-nil DISPLAY shows the buffer on the selected frame."
                 (duration_seconds . ,(if running :null (or duration :null)))
                 (command . ,command) (directory . ,directory) (buffer . ,buffer))
               (if full
-                  `((output . ,output))
+                  `((output . ,(compilation-history-agent--sanitize output)))
                 (compilation-history-agent--tail output)))))))
     (error (compilation-history-agent--error-reply "history_unavailable" (error-message-string err)))))
 
