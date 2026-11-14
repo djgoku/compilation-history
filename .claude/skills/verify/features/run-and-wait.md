@@ -1,14 +1,15 @@
 # Run, start and wait
 
-An agent starts a build in the user's Emacs without moving their windows, gets its history ID immediately, and later blocks until the build finishes. `run` does both in one call. The finished result has the same shape as `get`.
+An agent starts a build in the user's Emacs without moving their windows, gets its history ID immediately, and later blocks until the build finishes. `run` does both in one call. The finished result is the `get` result plus a fresh `display` snapshot.
 
 ## Sub-features
 
-- `start-returns-id` returns `state: running`, the ID, command, directory and buffer.
+- `start-returns-id` returns `state: running`, the ID, command, directory, buffer and `display`, with `visible` and `selected` both false. `directory` comes back absolute with a trailing slash.
 - `start-keeps-selection` leaves the selected window and buffer unchanged.
 - `wait-success` returns `success`, `exit_code: 0` and the output tail.
 - `wait-failure` returns `failure` with the real exit code.
-- `wait-repeat` returns an identical result when waited again.
+- `wait-repeat` returns an identical result except `display` when waited again while the result is retained (`compilation-history-agent-retention-seconds`, default one hour).
+- `wait-concurrent` gives several waiters on one ID the same reply. A waiter that disconnects early does not cancel the build or the other waiters.
 - `run-combined` starts then waits, printing only the final result.
 - `unicode` round-trips non-ASCII commands and output.
 - `invalid-utf8` reports non-UTF-8 output bytes as U+FFFD instead of failing.
@@ -27,9 +28,10 @@ Preconditions:
 - A launched server and `DOCTOR OK`.
 
 - **Selection baseline.** Run `$S/observe.sh '(buffer-name (window-buffer (selected-window)))' > "$VERIFY_EVIDENCE/selected-before"`.
-- **Start.** Run `id=$($S/capture.sh start-ok $S/cli.sh start --directory "$VERIFY_ROOT" --command "sleep 1; printf 'built-λ\n'" | jq -r .id)`. Exit 0; `.state == "running"`, `.command` is the command as given, and `.display.visible` and `.display.selected` are both false.
+- **Start.** Run `id=$($S/capture.sh start-ok $S/cli.sh start --directory "$VERIFY_ROOT" --command "sleep 2; printf 'built-λ\n'" | jq -r .id)`. Exit 0; `.state == "running"`, `.command` is the command as given, and `.display.visible` and `.display.selected` are both false.
+- **Concurrent.** Run `$S/capture.sh wait-b $S/cli.sh wait "$id" &`. Then run `$S/cli.sh wait "$id" &`, `sleep 0.5` and `kill $!` to drop that second waiter early. Run the Wait step below, then `wait` for wait-b. `wait-ok.out` and `wait-b.out` are identical.
 - **Selection unchanged.** Run the selection baseline command again into `selected-after` and compare. The two files match.
-- **Wait.** Run `$S/capture.sh wait-ok $S/cli.sh wait "$id"`. It blocks about a second, then exits 0 with `.state == "success"`, `.exit_code == 0` and `.tail` containing `built-λ`.
+- **Wait.** Run `$S/capture.sh wait-ok $S/cli.sh wait "$id"`. It blocks about two seconds, then exits 0 with `.state == "success"`, `.exit_code == 0` and `.tail` containing `built-λ`.
 - **Repeat.** Run `$S/capture.sh wait-again $S/cli.sh wait "$id"`. Output equals `wait-ok.out` except for `display`.
 - **Persisted.** Run `$S/capture.sh get-after-wait $S/cli.sh get "$id"`. `.state`, `.exit_code` and `.tail` match the wait result.
 - **Failure.** Run `$S/capture.sh run-fail $S/cli.sh run --directory "$VERIFY_ROOT" --command 'printf boom; exit 7'`. Exit 0; `.state == "failure"`, `.exit_code == 7`.

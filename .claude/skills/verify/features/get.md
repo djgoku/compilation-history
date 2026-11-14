@@ -10,7 +10,8 @@
 - `get-unknown` returns `unknown_id` with no `recovery`.
 - `get-invalid` rejects an ID that is not a history timestamp with `invalid_request`.
 - `get-interface-off` works while the interface is disabled.
-- `get-large` returns multi-megabyte output in about a second.
+- `get-no-db` returns `history_unavailable` when the database file is missing, and does not create it.
+- `get-large` returns multi-megabyte output in under a second.
 
 ## How to get to it (user POV)
 
@@ -25,14 +26,15 @@ Preconditions:
 - **Long output.** Run `id=$($S/cli.sh run --directory "$VERIFY_ROOT" --command 'seq 1 5000' | jq -r .id)`.
 - **Tail.** Run `$S/capture.sh get-tail $S/cli.sh get "$id"`. `.tail_truncated == true`, `(.tail | length) == 4096`, `.tail` contains `5000`.
 - **Short.** Run `sid=$($S/cli.sh run --directory "$VERIFY_ROOT" --command 'printf hello' | jq -r .id)` and `$S/cli.sh get "$sid"`. `.tail_truncated == false` and `.tail` contains `hello`.
-- **Full.** Run `$S/capture.sh get-full $S/cli.sh get "$id" --full`. `.output` contains `\n1\n` and `5000`; no `tail` or `output_file` key.
+- **Full.** Run `$S/capture.sh get-full $S/cli.sh get "$id" --full`. `(.output | length)` is over 23000 and `.output` contains `\n1\n`; no `tail` or `output_file` key.
 - **No leaked file.** Run `find "$VERIFY_ROOT" -maxdepth 1 -name 'ch-agent-output-*' | wc -l`. Prints `0`.
 - **Running.** Run `rid=$($S/cli.sh start --directory "$VERIFY_ROOT" --command 'sleep 3' | jq -r .id)` then `$S/capture.sh get-running $S/cli.sh get "$rid"`. `.state == "running"`, `.exit_code == null`, `.duration_seconds == null`.
 - **Unknown.** Run `$S/capture.sh get-unknown $S/cli.sh get 20000101T000000000000`. Exit 1; `.error == "unknown_id"` and no `recovery` key. `$S/capture.sh get-invalid $S/cli.sh get not-an-id` exits 1 with `invalid_request`.
 - **Interface off.** Run `$S/observe.sh '(compilation-history-agent-mode -1)'`, then `$S/capture.sh get-interface-off $S/cli.sh get "$id"`. Exit 0 with the same state as `get-tail`. Restore with `$S/observe.sh '(compilation-history-agent-mode 1)'`.
-- **Large.** Run `big=$($S/cli.sh run --directory "$VERIFY_ROOT" --command 'head -c 4194304 /dev/zero | tr "\0" x' | jq -r .id)`, then time `$S/capture.sh get-large $S/cli.sh get "$big" --full`. `(.output | length)` is over 4194304 and the call takes about a second.
+- **No database.** Run `$S/observe.sh '(setq compilation-history-db-file (expand-file-name "none.db" temporary-file-directory))'`, then `$S/capture.sh get-no-db $S/cli.sh get "$id"`. Exit 1, `.error == "history_unavailable"`, and `test ! -e "$VERIFY_ROOT/none.db"` passes. Restore with the same `setq` to `"history.db"`. Setting the variable through `observe.sh` is setup, like doctor's toggles.
+- **Large.** Run `big=$($S/cli.sh run --directory "$VERIFY_ROOT" --command 'head -c 4194304 /dev/zero | tr "\0" x' | jq -r .id)`, then time `$S/capture.sh get-large $S/cli.sh get "$big" --full`. `(.output | length)` is over 4194304 and the call takes under a second.
 
 ## Gotchas
 
 - Full output is handed over in a temporary file that the CLI deletes. The fixture's temp dir is `$VERIFY_ROOT`, so a leftover `ch-agent-output-*` there is a leak.
-- Persisted output can contain raw ANSI escapes and differs from the displayed buffer.
+- Persisted output keeps raw ANSI escapes, so it can differ from the displayed buffer.

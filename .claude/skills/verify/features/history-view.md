@@ -5,8 +5,11 @@
 ## Sub-features
 
 - `view-columns` shows `#`, `Start Time`, `Duration`, `Status`, `Exit`, `Commit`, `Branch`, `Directory`, `Command`.
+- `view-empty` shows `No compilations found.` before any compile.
+- `view-footer` shows `[First]`, `[Previous]`, `[Next]` and `[Last]` buttons in the footer.
 - `view-open` opens the record at point in another window with `RET` and selects it.
-- `view-preview` shows the record at point with `SPC` and keeps the view selected; `n`/`p` then move and update the preview.
+- `view-rebuild` rebuilds a killed buffer from the database when `RET` opens its record, read-only with `compilation-history-buffer-mode` on.
+- `view-preview` shows the record at point with `SPC` and keeps the view selected; `n`/`p`, or `M-n`/`M-p`, then move and update the preview.
 - `view-refresh` picks up new compilations with `g`.
 - `view-paging` moves between pages with `C-v`, `M-v`, `<`, `>`.
 - `view-quit` hides the view and its opened buffers with `q`, keeping them live.
@@ -22,18 +25,19 @@ Preconditions:
 
 - A `--tui` launch with at least two finished compiles. Fastest is `$S/cli.sh run --directory "$VERIFY_ROOT/work" --command "printf 'alpha-marker\n'"`, then the same with `printf 'beta-marker\n'; exit 3`; `compile-tracking.md` covers the keyboard path.
 
-- **Open view.** Run `$S/keys.sh C-c c v` and `$S/screen.sh --wait '\(2 records\)' view-list`. The header line lists the nine columns; row 1 is `beta-marker` with `failure 3`, row 2 `alpha-marker` with `success 0`. The footer reads `Page 1 of 1 (2 records)`.
+- **Open view.** Run `$S/keys.sh C-c c v` and `$S/screen.sh --wait '\(2 records\)' view-list`. The header line lists the nine columns; row 1 is `beta-marker` with `failure 3`, row 2 `alpha-marker` with `success 0`. The Exit column is right-aligned, so match `failure +3` and `success +0`, not the literal text. The footer reads `Page 1 of 1 (2 records)`.
 - **Open a record.** Run `$S/keys.sh M-\<` then `$S/keys.sh Enter`. `$S/observe.sh '(buffer-name (window-buffer (selected-window)))'` names the `beta-marker` compilation buffer, and `screen.sh` shows its output below the view.
 - **Preview.** Run `$S/keys.sh C-x o` back to the view, `$S/keys.sh Space`, then `$S/keys.sh n`. The selected window stays `*Compilation History*` and the other window switches to the `alpha-marker` buffer.
 - **Refresh.** Run another `cli.sh run` with `printf 'gamma-marker\n'`, then `$S/keys.sh g`. The footer reads `(3 records)` and row 1 is `gamma-marker`.
-- **Paging.** Run `tmux -S "$VERIFY_ROOT/tmux.sock" resize-window -t verify -y 12`, make 8 more records with `cli.sh run`, then `$S/keys.sh g` and `$S/screen.sh --wait 'Page 1 of [0-9]+ \(11 records\)'`. The footer reads `Page 1 of N` with N greater than 1; `C-v` shows `Page 2`, `>` the last page, `<` page 1. Restore the pane with `resize-window -t verify -y 48`.
+- **Paging.** Run `tmux -S "$VERIFY_ROOT/tmux.sock" resize-window -t verify -y 12`, make 8 more records with `cli.sh run`, then `$S/keys.sh g` and `$S/screen.sh --wait 'Page 1 of [0-9]+ \(11 records\)'`. The footer reads `Page 1 of N` with N greater than 1. `$S/keys.sh C-v` shows `Page 2` and `$S/keys.sh M-v` goes back to `Page 1`. `$S/keys.sh '>'` shows the last page and `$S/keys.sh '<'` page 1. Restore the pane with `resize-window -t verify -y 48`.
 - **Quit.** Run `$S/keys.sh q`. The view and opened buffers are no longer displayed; `$S/observe.sh '(get-buffer "*Compilation History*")'` is still a live buffer.
 - **Kill all.** Run `$S/keys.sh C-c c v`, then `$S/keys.sh Q`. `$S/observe.sh '(length (seq-filter (lambda (b) (string-prefix-p "*compilation-history-" (buffer-name b))) (buffer-list)))'` is `0`, though the view opened only two of the eleven, and `*Compilation History*` is gone.
+- **Rebuild.** Run `$S/keys.sh C-c c v`. The footer reads `Page 1 of 1 (11 records)` at full height. `$S/keys.sh M-\<` then `$S/keys.sh Enter` rebuilds that record's buffer: `$S/observe.sh '(with-current-buffer (window-buffer (selected-window)) (list compilation-history-buffer-mode buffer-read-only))'` is `(t t)`.
 
 ## Gotchas
 
 - The `#` header is the window's header line, not buffer text. Buffer line 1 is the newest row; `M-<` lands on it.
 - `n` and `p` only update the other window after `SPC` turns preview on. Send it as `keys.sh Space`; `keys.sh SPC` types the letters S, P and C.
-- Page size is the view window's height minus 6, recomputed only on `g`. After a record is opened the view has about half the frame, so a 12-row pane shows one row per page.
+- Page size is the view window's height minus 6, recomputed on `g` and when the view buffer is created. Reopening a still-live view keeps the old size. After a record is opened the view has about half the frame, so a 12-row pane shows one row per page.
 - Run `search.md` before the Refresh step. Its counts assume only the alpha and beta records.
 - Rows sort by start time, and compilations started in the same second list newest first.

@@ -30,6 +30,7 @@ to the repo root) and are executable.
 eval "$(.claude/skills/verify/scripts/launch.sh)"        # agent CLI recipes
 eval "$(.claude/skills/verify/scripts/launch.sh --tui)"  # Emacs UI recipes
 export VERIFY_EVIDENCE=$PWD/.verify/evidence/$(date +%Y%m%dT%H%M%S)
+mkdir -p "$VERIFY_EVIDENCE"
 ```
 
 Both modes create `/tmp/ch-verify.XXXXXX` with a git repo at `work/` (branch
@@ -171,6 +172,8 @@ the agent module.
   (`jq = "1.8.2"` in `mise.toml`); the CLI itself needs only `emacs`. If `jq`
   fails with a mise "shim fallback recursion" error, run `mise install` in the
   repo.
+- `--tui` needs `tmux` on PATH. Without it, `launch.sh --tui` exits with
+  `Missing required tool: tmux`. tmux is not in the repo's `mise.toml`.
 - `doctor.sh` fails with "server loaded …/compilation-history-agent.elc" when
   compiled files sit in the checkout; `mise run check` (melpa-check) leaves
   them. `load` prefers them over the sources, so delete the checkout's `*.elc`

@@ -48,8 +48,8 @@ exactly four H2 sections in this order: `Sub-features`,
 Emacs UI (`launch.sh --tui`):
 
 - [Compile tracking](./compile-tracking.md) covers recording success, failure, killed and comint compiles.
-- [History view](./history-view.md) covers listing, opening, preview, refresh, paging and quit.
-- [Search](./search.md) covers plain, column, short-term, completion and clear.
+- [History view](./history-view.md) covers the empty state, listing, opening, preview, refresh, paging and quit.
+- [Search](./search.md) covers plain, column, short-term, state filters, completion and clear.
 - [Recompile](./recompile.md) covers rerunning from a history buffer.
 
 Agent CLI (`launch.sh`):
@@ -57,6 +57,6 @@ Agent CLI (`launch.sh`):
 - [Doctor](./doctor.md) covers health reporting with the interface on and off.
 - [Run, start and wait](./run-and-wait.md) covers starting builds and blocking until they finish.
 - [Get persisted history](./get.md) covers the compact tail, full output and recovery.
-- [List and search history](./list.md) covers newest-first listing, paging, search and bad input.
-- [Show a compilation](./show.md) covers displaying and selecting buffers.
+- [List and search history](./list.md) covers newest-first listing, paging, search with state filters and bad input.
+- [Show a compilation](./show.md) covers displaying and selecting buffers and reopening closed compilations.
 - [Interface lifecycle](./interface-lifecycle.md) covers disable, re-enable, expiry, waits on unknown IDs and killed builds.
