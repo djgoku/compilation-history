@@ -504,6 +504,9 @@ raise a frame or request operating-system focus."
                               :family 'local :server t
                               :service (compilation-history-agent--socket)
                               :coding 'binary :noquery t
+                              ;; A listener without a filter gives each
+                              ;; connection a buffer that outlives it.
+                              :filter #'compilation-history-agent--filter
                               :log #'compilation-history-agent--accept))
   (add-hook 'compilation-history-final-save-functions #'compilation-history-agent--final-save)
   (add-hook 'kill-emacs-hook #'compilation-history-agent--disable 90))
