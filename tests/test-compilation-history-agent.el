@@ -225,6 +225,22 @@
       (should (process-live-p (get-buffer-process (get-buffer (alist-get 'buffer start)))))
       (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-reply stays)))))))
 
+(ert-deftest agent-wait-connections-leave-no-buffers-behind ()
+  (compilation-history-agent-test-with-session
+    (let* ((id (alist-get 'id (compilation-history-agent-test-start "sleep 0.3; printf done")))
+           (gone (compilation-history-agent-test-wait id))
+           (stays (compilation-history-agent-test-wait id)))
+      (compilation-history-agent-test-pause 0.1)
+      (delete-process gone)
+      (should (equal "succeeded" (alist-get 'state (compilation-history-agent-test-reply stays))))
+      (should (equal "wait_unavailable"
+                     (alist-get 'error (compilation-history-agent-test-reply
+                                        (compilation-history-agent-test-wait
+                                         "20200101T000000000000")))))
+      (compilation-history-agent-test-pause 0.1)
+      (should-not (seq-filter (lambda (name) (string-prefix-p "compilation-history-agent <" name))
+                              (mapcar #'buffer-name (buffer-list)))))))
+
 (ert-deftest agent-wait-expiry-is-completion-based-and-history-survives ()
   (compilation-history-agent-test-with-session
     (let* ((compilation-history-agent-retention-seconds 0.3)
